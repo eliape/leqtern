@@ -141,6 +141,30 @@ describe('Workspace', () => {
     ])
   })
 
+  it('archives a topic, moving on to the next one, and keeps everything for later', () => {
+    const ws = new Workspace()
+    const first = ws.createTopic('First')
+    const second = ws.createTopic('Second')
+    const third = ws.createTopic('Third')
+    ws.selectTopic(second.id)
+    ws.archiveTopic(second.id)
+    expect(ws.activeTopicId).toBe(third.id)
+    ws.archiveTopic(third.id)
+    expect(ws.activeTopicId).toBe(first.id)
+    ws.archiveTopic(first.id)
+    expect(ws.activeTopicId).toBeUndefined()
+    // Saved and brought back archived, then unarchived.
+    const back = new Workspace()
+    back.restore(JSON.parse(JSON.stringify(ws.snapshot())))
+    expect(back.topics.map((t) => [t.name, !!t.archived])).toEqual([
+      ['First', true],
+      ['Second', true],
+      ['Third', true],
+    ])
+    back.unarchiveTopic(second.id)
+    expect(back.topics.find((t) => t.name === 'Second')?.archived).toBe(false)
+  })
+
   it('moves a tab to a new place in the row', () => {
     const ws = new Workspace()
     const [a, b, c] = ['a', 'b', 'c'].map((n, i) => ws.addDoc(`${n}.pdf`, bytes(i + 1)))

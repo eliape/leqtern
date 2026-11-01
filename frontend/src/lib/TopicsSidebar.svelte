@@ -2,6 +2,9 @@
   import { tick } from 'svelte'
   import { slide } from 'svelte/transition'
   import { FLASHCARD_ICON } from './flashcards'
+
+  // A box with a lid.
+  const ARCHIVE_ICON = 'M3 4h18v4H3zM5 8v12h14V8M10 12h4'
   import { marquee } from './marquee'
   import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
 
@@ -33,6 +36,27 @@
     onopenprofile,
     onopenflashcards,
   }: Props = $props()
+
+  // Archived topics are listed apart, in their own section above Settings.
+  const shown = $derived(workspace.topics.filter((t) => !t.archived))
+  const archived = $derived(workspace.topics.filter((t) => t.archived))
+  const ARCHIVE_KEY = 'leqtern.archiveOpen'
+  let archiveOpen = $state(read())
+  function read(): boolean {
+    try {
+      return localStorage.getItem(ARCHIVE_KEY) === '1'
+    } catch {
+      return false
+    }
+  }
+  function toggleArchive() {
+    archiveOpen = !archiveOpen
+    try {
+      localStorage.setItem(ARCHIVE_KEY, archiveOpen ? '1' : '0')
+    } catch {
+      // Not remembered, that is all.
+    }
+  }
 
   // A topic's discussions slide open and shut, quickly, unless motion is reduced.
   const listSlide = () => ({
@@ -169,12 +193,12 @@
     <div id="topics-list" class="list fade">
       <h2>Topics</h2>
 
-      {#if workspace.topics.length === 0}
+      {#if shown.length === 0 && archived.length === 0}
         <p class="hint">Topics group the PDFs you study together, like lecture notes, old exams and the course book.</p>
       {/if}
 
       <ul>
-        {#each workspace.topics as topic (topic.id)}
+        {#each shown as topic (topic.id)}
           <li class:active={topic.id === workspace.activeTopicId}>
             {#if renamingId === topic.id}
               <form
@@ -249,6 +273,17 @@
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d={FLASHCARD_ICON} /></svg>
                     Flashcards
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onclick={() => {
+                      menuId = undefined
+                      workspace.archiveTopic(topic.id)
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={ARCHIVE_ICON} /></svg>
+                    Archive
                   </button>
                   <button
                     type="button"
@@ -421,6 +456,55 @@
         {/each}
       </ul>
     </div>
+  {/if}
+
+  {#if expanded && archived.length}
+    <!-- Topics put away. Above Settings, closed until asked for; the list scrolls if it gets long. -->
+    <section class="archive fade" aria-label="Archive">
+      <h3>
+        <button type="button" class="list-toggle" aria-expanded={archiveOpen} aria-controls="archive-list" onclick={toggleArchive}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          Archive
+          <span class="archive-count">{archived.length}</span>
+        </button>
+      </h3>
+      {#if archiveOpen}
+        <ul id="archive-list" transition:slide={listSlide()}>
+          {#each archived as topic (topic.id)}
+            <li class:active={topic.id === workspace.activeTopicId}>
+              <button
+                type="button"
+                class="topic"
+                aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
+                title={topic.name}
+                onclick={() => workspace.selectTopic(topic.id)}
+              >
+                <span class="name" use:marquee><span>{topic.name}</span></span>
+              </button>
+              <!-- Two plain buttons rather than a menu, which the scrolling list would clip. -->
+              <button
+                type="button"
+                class="dots"
+                aria-label={`Unarchive ${topic.name}`}
+                title="Unarchive"
+                onclick={() => workspace.unarchiveTopic(topic.id)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v4H3zM5 8v12h14V8M12 17v-6M9 14l3-3 3 3" /></svg>
+              </button>
+              <button
+                type="button"
+                class="dots danger"
+                aria-label={`Delete ${topic.name}`}
+                title="Delete"
+                onclick={() => remove(topic.id, topic.name)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   {/if}
 
   <!-- At the bottom, in the same fixed cell as the plus, so it stays put in the collapsed strip too. -->
@@ -744,6 +828,39 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted);
+  }
+  /* Above Settings, never squeezed; a long list of archived topics scrolls inside it. */
+  .archive {
+    flex-shrink: 0;
+    width: calc(15rem - 0.75rem);
+    padding-top: 0.25rem;
+    border-top: 1px solid var(--border);
+  }
+  .archive h3 {
+    margin-top: 0.125rem;
+  }
+  .archive ul {
+    max-height: 9rem;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .archive-count {
+    margin-left: 0.25rem;
+    font-weight: normal;
+    letter-spacing: 0;
+  }
+  .archive .dots svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .archive .dots {
+    margin-right: 0;
+  }
+  .archive .dots.danger:hover {
+    color: var(--danger);
   }
   .list-toggle {
     display: flex;
