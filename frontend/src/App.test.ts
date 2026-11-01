@@ -534,12 +534,12 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
     // It leaves the topics and waits behind the Archive button, which is always there.
     expect(screen.queryByRole('button', { name: /^Actions for a/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: 'Archived topics' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Archive' })).not.toBeInTheDocument()
     await fireEvent.click(screen.getByRole('button', { name: /^Archive/ }))
-    const list = within(screen.getByRole('dialog', { name: 'Archived topics' }))
+    const list = within(screen.getByRole('dialog', { name: 'Archive' }))
     expect(list.getByRole('button', { name: 'a' })).toBeInTheDocument()
     await fireEvent.click(list.getByRole('button', { name: /^Unarchive/ }))
-    expect(screen.queryByRole('dialog', { name: 'Archived topics' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Archive' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Actions for a/ })).toBeInTheDocument()
   })
 
