@@ -156,6 +156,8 @@ export type Topic = {
   /** Whether the sidebar shows the topic's sources (closed unless set) and discussions (open unless false). */
   sourcesOpen?: boolean
   discussionsOpen?: boolean
+  /** Put away in the sidebar's Archive: everything is kept, and it can be opened or brought back. */
+  archived?: boolean
   chats: Chat[]
   chatId: string
   draft: string
@@ -307,6 +309,26 @@ export class Workspace {
   renameTopic(id: string, name: string) {
     const topic = this.topics.find((t) => t.id === id)
     if (topic && name.trim()) topic.name = name.trim()
+  }
+
+  /** Put a topic away in the Archive. If it was open, the next topic that is not archived is. */
+  archiveTopic(id: string) {
+    const topic = this.topics.find((t) => t.id === id)
+    if (!topic || topic.archived) return
+    topic.archived = true
+    if (this.activeTopicId === id) {
+      const left = this.openDiscussion()
+      const kept = this.topics.filter((t) => !t.archived)
+      const index = this.topics.indexOf(topic)
+      this.activeTopicId = (kept.find((t) => this.topics.indexOf(t) > index) ?? kept[kept.length - 1])?.id
+      this.noteIfLeft(left)
+    }
+  }
+
+  /** Bring a topic back from the Archive to the topics list. */
+  unarchiveTopic(id: string) {
+    const topic = this.topics.find((t) => t.id === id)
+    if (topic) topic.archived = false
   }
 
   deleteTopic(id: string) {
@@ -1011,6 +1033,7 @@ export class Workspace {
           docs,
           open: topic.openDocIds.filter((id) => docs.some((d) => d.id === id)),
           activeDocId: topic.openDocIds.includes(topic.activeDocId ?? '') && docs.some((d) => d.id === topic.activeDocId) ? topic.activeDocId : topic.openDocIds.find((id) => docs.some((d) => d.id === id)),
+          ...(topic.archived && { archived: true }),
           ...(topic.sourcesOpen && { sourcesOpen: true }),
           ...(topic.discussionsOpen === false && { discussionsOpen: false }),
           ...(topic.scope?.trim() && { scope: topic.scope }),
@@ -1052,6 +1075,7 @@ export class Workspace {
         docIds,
         openDocIds,
         activeDocId: t.activeDocId && openDocIds.includes(t.activeDocId) ? t.activeDocId : openDocIds[0],
+        ...(t.archived === true && { archived: true }),
         ...(t.sourcesOpen && { sourcesOpen: true }),
         ...(t.discussionsOpen === false && { discussionsOpen: false }),
         ...restoredChats(t),

@@ -410,9 +410,9 @@ describe('App', () => {
     await fireEvent.click(dots)
     expect(dots).toHaveAttribute('aria-expanded', 'true')
     const items = screen.getAllByRole('menuitem')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Scope and conventions', 'Flashcards', 'Delete'])
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Rename', 'Scope and conventions', 'Flashcards', 'Archive', 'Delete'])
     expect(items.every((i) => i.querySelector('svg'))).toBe(true)
-    expect(items[3]).toHaveClass('danger')
+    expect(items[4]).toHaveClass('danger')
 
     await fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
@@ -523,6 +523,24 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Discussions' }))
     expect(screen.getByRole('button', { name: 'Sources' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('button', { name: 'Discussions' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('puts an archived topic in the Archive above Settings, and brings it back', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await screen.findByRole('tab', { name: 'a.pdf' })
+    await showTopics()
+    expect(screen.queryByRole('region', { name: 'Archive' })).not.toBeInTheDocument()
+    await fireEvent.click(screen.getByRole('button', { name: /^Actions for a/ }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
+    // It leaves the topics and waits in the Archive, which starts closed.
+    expect(screen.queryByRole('button', { name: /^Actions for a/ })).not.toBeInTheDocument()
+    const archive = screen.getByRole('region', { name: 'Archive' })
+    expect(within(archive).getByRole('button', { name: /^Archive/ })).toHaveAttribute('aria-expanded', 'false')
+    await fireEvent.click(within(archive).getByRole('button', { name: /^Archive/ }))
+    await fireEvent.click(within(archive).getByRole('button', { name: /^Unarchive/ }))
+    expect(screen.queryByRole('region', { name: 'Archive' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Actions for a/ })).toBeInTheDocument()
   })
 
   it('reorders tabs by dragging one onto another', async () => {
