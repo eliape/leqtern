@@ -525,21 +525,21 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Discussions' })).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('puts an archived topic in the Archive above Settings, and brings it back', async () => {
+  it('puts an archived topic in the list the Archive button opens, and brings it back', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))
     await screen.findByRole('tab', { name: 'a.pdf' })
     await showTopics()
-    expect(screen.queryByRole('region', { name: 'Archive' })).not.toBeInTheDocument()
     await fireEvent.click(screen.getByRole('button', { name: /^Actions for a/ }))
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }))
-    // It leaves the topics and waits in the Archive, which starts closed.
+    // It leaves the topics and waits behind the Archive button, which is always there.
     expect(screen.queryByRole('button', { name: /^Actions for a/ })).not.toBeInTheDocument()
-    const archive = screen.getByRole('region', { name: 'Archive' })
-    expect(within(archive).getByRole('button', { name: /^Archive/ })).toHaveAttribute('aria-expanded', 'false')
-    await fireEvent.click(within(archive).getByRole('button', { name: /^Archive/ }))
-    await fireEvent.click(within(archive).getByRole('button', { name: /^Unarchive/ }))
-    expect(screen.queryByRole('region', { name: 'Archive' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Archived topics' })).not.toBeInTheDocument()
+    await fireEvent.click(screen.getByRole('button', { name: /^Archive/ }))
+    const list = within(screen.getByRole('dialog', { name: 'Archived topics' }))
+    expect(list.getByRole('button', { name: 'a' })).toBeInTheDocument()
+    await fireEvent.click(list.getByRole('button', { name: /^Unarchive/ }))
+    expect(screen.queryByRole('dialog', { name: 'Archived topics' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Actions for a/ })).toBeInTheDocument()
   })
 
