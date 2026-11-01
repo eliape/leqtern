@@ -40,19 +40,24 @@
   // Archived topics are listed apart, in their own section above Settings.
   const shown = $derived(workspace.topics.filter((t) => !t.archived))
   const archived = $derived(workspace.topics.filter((t) => t.archived))
-  // The Archive button opens a list of them beside the sidebar. `popup` is where it goes: fixed, so
-  // the sidebar's own clipping does not cut it off.
-  let archiveButton = $state<HTMLButtonElement>()
-  let popup = $state<{ left: number; bottom: number }>()
+  // The Archive button opens a dialog listing them, like the Settings one.
+  let popup = $state(false)
+  let archiveCard = $state<HTMLElement>()
+  let archiveReturn: HTMLElement | null = null
   function toggleArchive() {
-    if (popup) return (popup = undefined)
-    const button = archiveButton?.getBoundingClientRect()
-    const side = archiveButton?.closest('aside')?.getBoundingClientRect()
-    if (button && side) popup = { left: side.right + 6, bottom: window.innerHeight - button.bottom }
+    archiveReturn = document.activeElement as HTMLElement | null
+    popup = !popup
   }
+  function closeArchive() {
+    popup = false
+    archiveReturn?.focus?.()
+  }
+  $effect(() => {
+    if (popup) archiveCard?.focus()
+  })
   // Nothing left in it: close it.
   $effect(() => {
-    if (popup && archived.length === 0) popup = undefined
+    if (popup && archived.length === 0) popup = false
   })
 
   // A topic's discussions slide open and shut, quickly, unless motion is reduced.
@@ -85,7 +90,6 @@
   function closeMenu(event: Event) {
     const target = event.target as Element | null
     if (menuId && !target?.closest?.('.topic-menu, .dots')) menuId = undefined
-    if (popup && !target?.closest?.('.archive-popup, .archive-button')) popup = undefined
   }
 
   let renamingId = $state<string>()
@@ -168,7 +172,7 @@
   }
 </script>
 
-<svelte:window onpointerdown={closeMenu} onkeydown={(e) => e.key === 'Escape' && ((menuId = undefined), (popup = undefined))} />
+<svelte:window onpointerdown={closeMenu} onkeydown={(e) => e.key === 'Escape' && ((menuId = undefined), popup && closeArchive())} />
 
 <aside class="topics-sidebar" class:closed={!open} id="topics-sidebar" aria-label="Topics">
   <div class="top">
@@ -461,10 +465,9 @@
   <button
     type="button"
     class="new settings archive-button"
-    bind:this={archiveButton}
     aria-label="Archive"
-    aria-haspopup="true"
-    aria-expanded={!!popup}
+    aria-haspopup="dialog"
+    aria-expanded={popup}
     title="Archive"
     onclick={toggleArchive}
   >
@@ -488,39 +491,44 @@
 </aside>
 
 {#if popup}
-  <!-- The archived topics: open one, bring it back, or delete it. -->
-  <div class="archive-popup" role="dialog" aria-label="Archived topics" style:left={`${popup.left}px`} style:bottom={`${popup.bottom}px`}>
-    <h3>Archive</h3>
-    <ul>
-      {#each archived as topic (topic.id)}
-        <li class:active={topic.id === workspace.activeTopicId}>
-          <button
-            type="button"
-            class="topic"
-            aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
-            title={topic.name}
-            onclick={() => {
-              workspace.selectTopic(topic.id)
-              popup = undefined
-            }}
-          >
-            <span class="name" use:marquee><span>{topic.name}</span></span>
-          </button>
-          <button
-            type="button"
-            class="dots"
-            aria-label={`Unarchive ${topic.name}`}
-            title="Unarchive"
-            onclick={() => workspace.unarchiveTopic(topic.id)}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v4H3zM5 8v12h14V8M12 17v-6M9 14l3-3 3 3" /></svg>
-          </button>
-          <button type="button" class="dots danger" aria-label={`Delete ${topic.name}`} title="Delete" onclick={() => remove(topic.id, topic.name)}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
-          </button>
-        </li>
-      {/each}
-    </ul>
+  <!-- The archived topics: open one, bring it back, or delete it. Pressing the backdrop closes it, like Settings. -->
+  <div class="archive-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && closeArchive()}>
+    <div bind:this={archiveCard} class="archive-popup" role="dialog" aria-modal="true" aria-labelledby="archive-title" tabindex="-1">
+      <header>
+        <h2 id="archive-title">Archive</h2>
+        <button type="button" class="chrome-button close" aria-label="Close archive" onclick={closeArchive}>×</button>
+      </header>
+      <ul>
+        {#each archived as topic (topic.id)}
+          <li class:active={topic.id === workspace.activeTopicId}>
+            <button
+              type="button"
+              class="topic"
+              aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
+              title={topic.name}
+              onclick={() => {
+                workspace.selectTopic(topic.id)
+                closeArchive()
+              }}
+            >
+              <span class="name" use:marquee><span>{topic.name}</span></span>
+            </button>
+            <button
+              type="button"
+              class="dots"
+              aria-label={`Unarchive ${topic.name}`}
+              title="Unarchive"
+              onclick={() => workspace.unarchiveTopic(topic.id)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v4H3zM5 8v12h14V8M12 17v-6M9 14l3-3 3 3" /></svg>
+            </button>
+            <button type="button" class="dots danger" aria-label={`Delete ${topic.name}`} title="Delete" onclick={() => remove(topic.id, topic.name)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </div>
   </div>
 {/if}
 
@@ -841,23 +849,46 @@
     font-size: 0.75rem;
     color: var(--muted);
   }
-  .archive-popup {
+  .archive-backdrop {
     position: fixed;
-    z-index: 31;
-    box-sizing: border-box;
-    width: 15rem;
-    max-height: 60vh;
-    overflow-y: auto;
-    padding: 0.375rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
-    font-size: 0.85rem;
-    white-space: nowrap;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(0 0 0 / 0.35);
   }
-  .archive-popup h3 {
-    margin-top: 0.125rem;
+  .archive-popup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    width: min(30rem, 100%);
+    max-height: 100%;
+    box-sizing: border-box;
+    overflow-y: auto;
+    padding: 1rem 1.25rem 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    background: var(--surface);
+    box-shadow: 0 16px 48px rgb(0 0 0 / 0.3);
+    font-size: 0.9rem;
+    outline: none;
+  }
+  .archive-popup header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .archive-popup h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: normal;
+    color: inherit;
+  }
+  .archive-popup .close {
+    font-size: 1.25rem;
   }
   .archive-popup .dots {
     visibility: visible;
