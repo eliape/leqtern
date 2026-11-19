@@ -757,6 +757,8 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    /* Nothing in an answer may make the whole log scroll sideways; wide maths scrolls in its own block. */
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     gap: var(--message-gap);
@@ -858,6 +860,13 @@
   .markdown :global(.katex) {
     font-size: 1.1em;
     white-space: nowrap;
+  }
+  .markdown :global(.math-long .katex) {
+    white-space: normal;
+  }
+  /* $$…$$ written inside a sentence is a display formula too, so it scrolls the same way. */
+  .markdown :global(span.math-display) {
+    display: block;
   }
 
   .message.user {
