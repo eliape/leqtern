@@ -826,7 +826,7 @@ describe('App', () => {
     expect(within(panel).getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Ask about p. 3…')
   })
 
-  it('opens a menu on a right-click on the page, whose Socratic and Quiz me attach the spot and wait for a focus', async () => {
+  it('opens a menu on a right-click on the page, whose Socratic and Quiz me attach the spot', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
@@ -858,7 +858,9 @@ describe('App', () => {
 
     await fireEvent.contextMenu(page, { clientX: 220, clientY: 160 })
     await fireEvent.click(screen.getByRole('menuitem', { name: /^Quiz me/ }))
-    expect(within(panel).getByRole('button', { name: 'Mode: Quiz' })).toBeInTheDocument()
+    // Quiz me asks in Normal mode, with what to ask for in the box.
+    expect(within(panel).getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Ask a question')).toHaveValue('Quiz me on this')
     expect(within(panel).getByLabelText('Attached to your question')).toBeInTheDocument()
 
     // A left click with Click to ask attaches the spot and switches back to normal answers.

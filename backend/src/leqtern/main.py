@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from . import deck as decks
 from .anki import package
-from .ask import AskRequest, Turn, describe, stream_answer, write_quiz
+from .ask import AskRequest, Turn, describe, stream_answer
 from .config import Settings, get_settings
 from .deck import CardDraft, Decks
 from .dedup import SentenceEmbedder
@@ -23,7 +23,7 @@ from .flashcards import FlashcardRequest, make_flashcards, sync_vectors
 from .flashcards import Services as FlashcardServices
 from .index import Indexer
 from .library import Library
-from .quiz import QuizRecord, reading_so_far, recommend
+from .quiz import QuizRecord, recommend
 from .register import (
     TIDY_AFTER,
     DiscussionRequest,
@@ -323,44 +323,6 @@ def ask(
     return StreamingResponse(events(client, request, services), media_type="application/x-ndjson")
 
 
-@app.post("/api/quiz")
-async def quiz(
-    request: AskRequest,
-    client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
-    services: ServicesDep,
-) -> dict[str, Any]:
-    """
-    A multiple-choice quiz for the newest turn, which asks for one. Without anything to focus
-    on, it covers the section being read, up to where the reader is.
-    """
-    last = request.messages[-1] if request.messages else None
-    if not last or last.mode != "quiz":
-        raise HTTPException(status_code=422, detail="The last message must ask for a quiz.")
-    try:
-        reading = []
-        if not last.text.strip() and last.context and last.context.doc_id:
-            doc_id = last.context.doc_id
-            ids = request.docs if doc_id in request.docs else [*request.docs, doc_id]
-            toolbox = Toolbox(
-                services.library,
-                topic_docs(services.library, services.indexer, ids, request.doc_names),
-            )
-            reading = await reading_so_far(toolbox, doc_id, last.context.page)
-        notes = await register_notes(request, services)
-        written = await write_quiz(
-            client,
-            request,
-            services.usage,
-            request.model or services.answer_model,
-            reading,
-            notes=notes,
-        )
-    except Exception as error:
-        logger.exception("Quiz failed")
-        raise HTTPException(status_code=502, detail=error_message(error)) from error
-    return written.model_dump()
-
-
 class RecommendRequest(BaseModel):
     topic: str
     about: Turn
@@ -377,9 +339,7 @@ async def quiz_recommendation(
     about = request.about
     asked = describe(about.context) if about.context else ""
     if about.text.strip():
-        asked += f" They asked the quiz to focus on: {about.text.strip()}"
-    elif about.context:
-        asked += " The quiz covered the section they were reading, up to there."
+        asked += f" They asked: {about.text.strip()}"
     try:
         text = await recommend(client, request.topic, asked, request.quiz, services.usage)
     except Exception as error:

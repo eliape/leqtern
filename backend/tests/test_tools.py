@@ -6,7 +6,7 @@ from leqtern.ask import AskRequest, Turn, build_messages, stream_answer
 from leqtern.hints import Hints, OpenCard
 from leqtern.index import ChunkRecord, DocIndex, Entry, Section
 from leqtern.library import Library
-from leqtern.quiz import reading_so_far
+from leqtern.quiz import QuizRecord
 from leqtern.tools import Toolbox, ToolError, TopicDoc, catalogue, overview, terms
 from leqtern.usage import UsageLog
 
@@ -260,26 +260,6 @@ async def test_must_answer_after_the_last_round(topic, monkeypatch) -> None:
     assert client.requests[-1]["tool_choice"] == {"type": "none"}
 
 
-async def test_a_quiz_without_a_focus_reads_the_section_up_to_the_page(topic) -> None:
-    book = topic.docs["D2"].info
-    # On p. 5 the latest section to start is 2.1 (with its chapter on p. 4): pp. 4–5.
-    blocks = await reading_so_far(topic, book.id, 5)
-    assert blocks[0]["text"] == (
-        'The section they are reading, "2.1 Chain rule", from its start up to where they are '
-        "(book.pdf, pp. 4–5):"
-    )
-    assert [b["type"] for b in blocks[1:]] == ["text", "text", "image"]
-    assert "composite functions" in blocks[1]["text"]
-    # Nothing after the page they are on.
-    third = await reading_so_far(topic, book.id, 3)
-    assert '"1 Limits", from its start' in third[0]["text"] and "pp. 1–3" in third[0]["text"]
-    # Without sections, the pages just before.
-    slides = await reading_so_far(topic, topic.docs["D1"].info.id, 2)
-    assert slides[0]["text"].startswith("No sections are known")
-    assert "pp. 1–2" in slides[0]["text"]
-    assert await reading_so_far(topic, "missing", 1) == []
-
-
 async def test_topic_docs_use_the_name_the_topic_gives_each_pdf(tmp_path) -> None:
     from leqtern.index import Indexer
     from leqtern.tools import topic_docs
@@ -343,7 +323,7 @@ async def test_hints_are_offered_without_documents_and_invalid_ones_go_back(tmp_
     request = AskRequest(topic="Calc", messages=[Turn(role="user", text="Hints?")])
     events = [e async for e in stream_answer(client, request, empty)]
 
-    assert [t["name"] for t in client.requests[0]["tools"]] == ["show_hints"]
+    assert [t["name"] for t in client.requests[0]["tools"]] == ["show_hints", "make_quiz"]
     assert client.requests[1]["messages"][-1]["content"][0]["is_error"]
     assert [e["type"] for e in events] == ["hints", "done"]
 
@@ -364,3 +344,67 @@ def test_a_question_carries_the_quiz_question_or_hint_on_show() -> None:
     content = build_messages(request)[-1]["content"]
     assert content[0]["text"] == "[Open in the chat: hint 2 of 2 of your hints: B]"
     assert content[1]["text"] == "Why is x not y?"
+
+
+def written_quiz_input() -> dict:
+    return {
+        "title": "Derivatives",
+        "questions": [
+            {
+                "level": "application",
+                "question": "What is the derivative of x^2?",
+                "answer": "2x",
+                "distractors": [
+                    {"misconception_rationale": "Keeps the power.", "text": "x^2"},
+                    {"misconception_rationale": "Drops the factor.", "text": "x"},
+                ],
+                "explanation": "Power rule.",
+            }
+        ],
+    }
+
+
+async def test_a_quiz_asked_for_in_the_chat_is_shown_and_ends_the_answer(topic) -> None:
+    client = FakeAnswerClient(
+        [([text("Here goes."), tool_use("q1", "make_quiz", written_quiz_input())], "tool_use")]
+    )
+    request = AskRequest(topic="Calc", messages=[Turn(role="user", text="Quiz me on this")])
+    events = [e async for e in stream_answer(client, request, topic)]
+
+    assert [e["type"] for e in events] == ["text", "step", "quiz", "done"]
+    assert events[1]["text"] == "Writing a quiz"
+    [question] = events[2]["quiz"]["questions"]
+    assert question["choices"][question["answer"]] == "2x"
+    assert len(client.requests) == 1
+
+    later = AskRequest(
+        topic="Calc",
+        messages=[
+            Turn(role="user", text="Quiz me on this"),
+            Turn(
+                role="assistant",
+                text="Here goes.",
+                quiz=QuizRecord(**events[2]["quiz"], picked=[question["answer"]]),
+            ),
+            Turn(role="user", text="Thanks"),
+        ],
+    )
+    sent = build_messages(later)
+    assert sent[1]["content"][0]["text"].startswith("Here goes.\n\n[Quiz] Derivatives")
+    assert sent[2]["content"][0]["text"].startswith("[Quiz results]")
+
+
+async def test_no_quiz_in_a_socratic_session(topic) -> None:
+    client = FakeAnswerClient(
+        [
+            ([tool_use("q1", "make_quiz", written_quiz_input())], "tool_use"),
+            ([text("What do you think?")], "end_turn"),
+        ]
+    )
+    request = AskRequest(
+        topic="Calc", messages=[Turn(role="user", text="Quiz me", mode="socratic")]
+    )
+    events = [e async for e in stream_answer(client, request, topic)]
+
+    assert [e["type"] for e in events] == ["step", "text", "done"]
+    assert client.requests[1]["messages"][-1]["content"][0]["is_error"]

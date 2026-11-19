@@ -19,7 +19,7 @@ export type AskTurn = {
   role: 'user' | 'assistant'
   text: string
   context?: Record<string, unknown>
-  /** Set on the reader's turns in a Socratic session, where the model asks the questions, and on quiz requests. */
+  /** Set on the reader's turns in a Socratic session, where the model asks the questions, and on quiz requests from older chats. */
   mode?: 'socratic' | 'quiz'
   /** On the model's side: a quiz it wrote, with how the reader did. */
   quiz?: QuizRecord
@@ -57,7 +57,10 @@ export type AskRequest = {
  * A piece of an answer's text, a piece of the summary of the model's thinking, or a lookup
  * the model made while answering.
  */
-export type AnswerEvent = { type: 'text' | 'thinking' | 'step'; text: string } | { type: 'hints'; hints: string[] }
+export type AnswerEvent =
+  | { type: 'text' | 'thinking' | 'step'; text: string }
+  | { type: 'hints'; hints: string[] }
+  | { type: 'quiz'; quiz: WrittenQuiz }
 
 /** Hints the model showed for an exercise, and how many of them the reader has turned over. */
 export type Hints = { items: string[]; revealed: number }
@@ -90,8 +93,9 @@ export async function* fetchAnswer(
     buffered = done ? '' : lines.pop()!
     for (const line of lines) {
       if (!line.trim()) continue
-      const event = JSON.parse(line) as { type: string; text?: string; message?: string; hints?: unknown }
-      if (event.type === 'hints' && Array.isArray(event.hints))
+      const event = JSON.parse(line) as { type: string; text?: string; message?: string; hints?: unknown; quiz?: WrittenQuiz }
+      if (event.type === 'quiz' && event.quiz && Array.isArray(event.quiz.questions)) yield { type: 'quiz', quiz: event.quiz }
+      else if (event.type === 'hints' && Array.isArray(event.hints))
         yield { type: 'hints', hints: event.hints.filter((h): h is string => typeof h === 'string') }
       else if ((event.type === 'text' || event.type === 'thinking' || event.type === 'step') && event.text)
         yield { type: event.type, text: event.text }
@@ -214,18 +218,6 @@ export async function saveWorkspace(
   if (!res.ok) throw await backendError(res)
   const saved = (await res.json()) as Partial<Saved>
   return { revision: saved.revision ?? from.base, deleted: saved.deleted ?? [], later: saved.later ?? [] }
-}
-
-/** Have the model write a multiple-choice quiz for the newest turn, which asks for one. */
-export async function createQuiz(request: AskRequest, signal?: AbortSignal, fetchFn: typeof fetch = fetch): Promise<WrittenQuiz> {
-  const res = await fetchFn('/api/quiz', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-    signal,
-  })
-  if (!res.ok) throw await backendError(res)
-  return (await res.json()) as WrittenQuiz
 }
 
 /** What a finished quiz was about (the request for it) and how it went. */

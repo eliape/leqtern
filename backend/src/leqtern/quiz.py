@@ -11,8 +11,6 @@ from typing import Any, Literal
 from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field
 
-from .index import page_range
-from .tools import ReadInput, Toolbox, TopicDoc
 from .usage import UsageLog, call_from_response
 
 # Writes the short recommendation after a quiz: a cheap, quick model is enough.
@@ -113,6 +111,32 @@ def arrange(written: WrittenQuiz, rng: random.Random | None = None) -> Quiz:
     return Quiz(title=written.title, questions=questions)
 
 
+def inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """A JSON schema with its $defs put in place, for a tool's input."""
+    defs = schema.pop("$defs", {})
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                return walk(defs[node["$ref"].split("/")[-1]])
+            return {k: walk(v) for k, v in node.items() if k != "title"}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+
+    return walk(schema)
+
+
+QUIZ_TOOL: dict[str, Any] = {
+    "name": "make_quiz",
+    "description": (
+        "Show them a multiple-choice quiz to click through, written by the quiz rules in your "
+        "instructions. Use it when they ask to be quizzed or tested."
+    ),
+    "input_schema": inline_refs(WrittenQuiz.model_json_schema()),
+}
+
+
 def misconception(q: QuizQuestion, choice: int) -> str | None:
     """The mistake behind a wrong choice, if the quiz says."""
     return q.misconceptions[choice] if 0 <= choice < len(q.misconceptions) else None
@@ -162,47 +186,6 @@ def results_text(quiz: QuizRecord) -> str | None:
     if quiz.recommendation:
         lines.append(f"They were advised: {quiz.recommendation}")
     return "\n".join(lines)
-
-
-# A quiz with nothing to focus on covers the section being read, from its start up to the page
-# they are on: at most this many pages, the last ones before that point.
-SECTION_PAGES = 8
-# Without any known sections, the pages up to where they are, this many.
-NEARBY_PAGES = 3
-
-
-def latest_section(doc: TopicDoc, page: int) -> tuple[str | None, int]:
-    """
-    The latest chapter or section to start at or before `page`, by the index or else the
-    PDF's bookmarks, and its first page. (None, page) when no section is known.
-    """
-    heads = [(s.start_page, s.level, s.title) for s in doc.index.sections] if doc.index else []
-    heads = heads or [(b.page, b.level, b.title) for b in doc.info.bookmarks]
-    started = [h for h in heads if h[0] <= page and h[1] <= 2]
-    if not started:
-        return None, page
-    # The latest start; of a chapter and its first section on one page, the section.
-    start, _, title = max(started, key=lambda h: (h[0], h[1]))
-    return title, start
-
-
-async def reading_so_far(toolbox: Toolbox, doc_id: str, page: int) -> list[dict[str, Any]]:
-    """The pages a quiz with nothing to focus on covers: the section up to where they are."""
-    doc = next((d for d in toolbox.docs.values() if d.info.id == doc_id), None)
-    if not doc or not 1 <= page <= doc.info.page_count:
-        return []
-    title, start = latest_section(doc, page)
-    if title is None:
-        first = max(1, page - NEARBY_PAGES + 1)
-        intro = "No sections are known for this document. The pages up to where they are"
-    else:
-        first = max(start, page - SECTION_PAGES + 1)
-        part = "from its start" if first == start else "its last pages"
-        intro = f'The section they are reading, "{title}", {part} up to where they are'
-    pages = list(range(first, page + 1))
-    blocks = await toolbox.read(ReadInput(doc=doc.alias, pages=pages))
-    where = page_range(doc.info, first, page)
-    return [{"type": "text", "text": f"{intro} ({doc.info.name}, {where}):"}, *blocks]
 
 
 RECOMMEND_PROMPT = """\

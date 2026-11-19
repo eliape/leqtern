@@ -18,14 +18,14 @@ from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
 
 from .hints import HINTS_TOOL, Hints, HintsInput, OpenCard, answer_text, open_text
-from .quiz import Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
+from .quiz import QUIZ_TOOL, Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
 from .tools import TOOLS, Toolbox, ToolError, TopicDoc, catalogue, overview
 from .usage import UsageLog, call_from_response
 
 # The default answering model; ANSWER_MODEL in backend/.env overrides it.
 MODEL = "claude-opus-5-5"
 # Low effort keeps thinking and lookups short, which is most of what an answer costs.
-# The reader can raise it for answers and quizzes in the chat.
+# The reader can raise it in the chat.
 EFFORT = "low"
 # Answers think adaptively and send a readable summary of it, which the chat shows above the
 # answer. The API never returns the raw thinking; without this the summary comes back empty.
@@ -36,9 +36,6 @@ MAX_ROUNDS = 8
 # more than 5 minutes apart, and rewriting them after the default 5-minute cache expires costs more
 # than the hour's higher write price (2x input instead of 1.25x).
 LONG_CACHE = {"type": "ephemeral", "ttl": "1h"}
-# Quizzes send no tools, so their prefix never matches the answers' cache: only another quiz
-# soon after could read what they cache, which the default 5 minutes covers at a lower price.
-SHORT_CACHE = {"type": "ephemeral"}
 
 SYSTEM_PROMPT = """\
 You help someone learn from PDFs they are studying, such as textbooks, papers and lecture \
@@ -105,12 +102,13 @@ Turns without [Socratic] are ordinary questions: answer them as usual. The first
 session starts with [Socratic session ended], because they switched back to normal answers: \
 stop asking them questions and answer directly.
 
-Quizzes: they can ask for a multiple-choice quiz with a turn starting with [Quiz]. They click \
-through it in the chat, and how they did comes back in a turn starting with [Quiz results]. When \
-you write a quiz:
-- Ask 4 to 6 questions about what they pointed at, and about what they asked it to focus on, \
-unless they ask for another number. When they give nothing to focus on, you get the section \
-they are reading up to where they are: ask about that, and nothing after that point.
+Quizzes: when they ask to be quizzed or tested, write a multiple-choice quiz with make_quiz \
+rather than questions in your answer, except in a Socratic session. They click through it in \
+the chat, and how they did comes back in a turn starting with [Quiz results]. When you write a \
+quiz:
+- Ask 4 to 6 questions about what they pointed at or asked about, unless they ask for another \
+number. With nothing pointed at or named, quiz them on the section they are reading, up to \
+where they are and nothing after it.
 - Make the wrong answers the heart of each question: each one is what a specific, common \
 mistake produces, never a random or silly option. In maths and physics, the exact result of a \
 procedural slip (a dropped minus sign, the diameter for the radius, a missed factor of 2, the \
@@ -130,7 +128,7 @@ questions that show a flawed application or argument and ask exactly what goes w
 - Explain each right answer in a sentence or two. Don't cite pages as sources; refer to the \
 text only when it helps to look at something, e.g. "Look at equation (2.3) (book.pdf, p. 41)" \
 or "As in the worked example (book.pdf, p. 40)", in the citation form above.
-- Write it from what you are shown; there is no looking things up for a quiz.
+- Read pages first only when what you are shown is not enough.
 - After earlier quizzes, come back to what they got wrong.
 In your other answers, use quiz results to adapt: build on what they know, and go over what \
 they got wrong when it comes up.
@@ -147,13 +145,8 @@ sources: don't cite them, and read the pages before relying on them."""
 
 # What a Socratic session's first turn asks for, when the reader typed nothing.
 SOCRATIC_START = "Start a Socratic session about what they pointed at: ask your first question."
-# What a quiz request asks for; the reader's words, if any, say what to focus on.
-QUIZ_START = "Write a quiz about what they pointed at."
-# What a quiz request with nothing to focus on asks for; the section's pages come with it.
-QUIZ_SECTION = (
-    "Write a quiz on the section they are reading, up to where they are: nothing after the "
-    "spot they pointed at or the page they are on."
-)
+# What a quiz request from an older chat (when Quiz was a mode) asked for.
+QUIZ_START = "Quiz me on what I pointed at."
 # Marks their first ordinary question after a Socratic session.
 SOCRATIC_END = (
     "[Socratic session ended] They switched back to normal answers: stop asking them "
@@ -312,9 +305,7 @@ def question_text(turn: Turn, starts_session: bool = False, ends_session: bool =
     """
     text = turn.text.strip()
     if turn.mode == "quiz":
-        if text:
-            return f"[Quiz] {QUIZ_START} Focus on: {text}"
-        return f"[Quiz] {QUIZ_SECTION if turn.context else QUIZ_START}"
+        return f"Quiz me on: {text}" if text else QUIZ_START
     if turn.mode == "socratic":
         if not text:
             return f"[Socratic] {SOCRATIC_START}"
@@ -342,9 +333,8 @@ def build_messages(
         if turn.role == "assistant":
             if turn.quiz:
                 # The quiz as written, then how they did, on their side of the conversation.
-                messages.append(
-                    {"role": "assistant", "content": [text_block(quiz_text(turn.quiz))]}
-                )
+                written = "\n\n".join(filter(None, [turn.text.strip(), quiz_text(turn.quiz)]))
+                messages.append({"role": "assistant", "content": [text_block(written)]})
                 results = results_text(turn.quiz)
                 if results:
                     messages.append({"role": "user", "content": [text_block(results)]})
@@ -460,53 +450,6 @@ def map_block(docs: list[TopicDoc], current: str | None) -> dict[str, Any] | Non
 Event = dict[str, Any]
 
 
-async def write_quiz(
-    client: AsyncAnthropic,
-    request: AskRequest,
-    usage: UsageLog | None = None,
-    model: str = MODEL,
-    reading: list[dict[str, Any]] | None = None,
-    notes: dict[str, Any] | None = None,
-) -> Quiz:
-    """
-    A multiple-choice quiz for the newest turn (a [Quiz] request), from what the reader is
-    shown and the conversation so far, including how earlier quizzes went. `reading` is
-    the section the quiz covers when they gave nothing to focus on, and `notes` the
-    register's notes for it.
-    """
-    messages = build_messages(request, cache=SHORT_CACHE)
-    if reading:
-        # Before the request itself, which stays last.
-        messages[-1]["content"][-1:-1] = reading
-    if notes:
-        messages[-1]["content"].insert(0, notes)
-    parts = question_parts(messages[-1]["content"], reading=reading, notes=[notes])
-    began = time.monotonic()
-    response: Any = await client.messages.parse(
-        model=model,
-        max_tokens=16000,
-        system=request_system(request, cache=SHORT_CACHE),  # type: ignore[arg-type]
-        messages=messages,  # type: ignore[arg-type]
-        output_format=WrittenQuiz,
-        output_config={"effort": request.effort},
-    )
-    if usage:
-        usage.record(
-            call_from_response(
-                "quiz",
-                model,
-                response,
-                time.monotonic() - began,
-                **question_details(request),
-                parts=parts,
-            )
-        )
-    quiz = arrange(response.parsed_output) if response.parsed_output else None
-    if not quiz or not quiz.questions:
-        raise RuntimeError(f"No quiz came back ({response.stop_reason})")
-    return quiz
-
-
 # Rough sizes for logging what a question is made of: characters per token of text, and
 # pixels per token of an image.
 CHARS_PER_TOKEN = 3.5
@@ -580,6 +523,15 @@ def record_stopped(
     usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True, **details))
 
 
+def written_quiz(raw: Any) -> Quiz | None:
+    """The quiz a make_quiz call wrote, arranged for the reader, or None if it is unusable."""
+    try:
+        quiz = arrange(WrittenQuiz.model_validate(raw))
+    except ValidationError:
+        return None
+    return quiz if quiz.questions else None
+
+
 def tool_error(tool_use_id: str, message: str) -> dict[str, Any]:
     return {"type": "tool_result", "tool_use_id": tool_use_id, "content": message, "is_error": True}
 
@@ -594,8 +546,9 @@ async def stream_answer(
 ) -> AsyncIterator[Event]:
     """
     Yield the answer as events: {"type": "text"} pieces as they arrive, {"type": "thinking"}
-    pieces of the summary of the model's thinking, and a {"type": "step"} for each lookup
-    the model makes. `notes` are the register's notes for
+    pieces of the summary of the model's thinking, a {"type": "step"} for each lookup the
+    model makes, and a {"type": "quiz"} or {"type": "hints"} it shows. `notes` are the
+    register's notes for
     the question, sent with it like the map, so they never break the history's cache.
     """
     aliases = {d.info.id: d.alias for d in toolbox.docs.values()}
@@ -609,7 +562,8 @@ async def stream_answer(
         for block in (notes, topic_map):
             if block:
                 messages[-1]["content"].insert(0, block)
-    tools = [*(TOOLS if toolbox.docs else []), HINTS_TOOL]
+    tools = [*(TOOLS if toolbox.docs else []), HINTS_TOOL, QUIZ_TOOL]
+    socratic = bool(request.messages) and request.messages[-1].mode == "socratic"
     parts = (
         question_parts(messages[-1]["content"], map=[topic_map], notes=[notes])
         if messages and messages[-1]["role"] == "user"
@@ -655,6 +609,12 @@ async def stream_answer(
                         yield {"type": "text", "text": event.text}
                     elif event.type == "thinking" and event.thinking:
                         yield {"type": "thinking", "text": event.thinking}
+                    elif (
+                        event.type == "content_block_start"
+                        and getattr(event.content_block, "name", None) == QUIZ_TOOL["name"]
+                    ):
+                        # A quiz takes a while to write: say so meanwhile.
+                        yield {"type": "step", "text": "Writing a quiz"}
             except (asyncio.CancelledError, GeneratorExit):
                 # The reader stopped the answer: leaving the stream closes it, so the model
                 # stops writing. Log what the call cost so far (output is only counted at the end).
@@ -696,8 +656,20 @@ async def stream_answer(
             break
 
         results = []
-        lookups = [b for b in tool_uses if b.name != HINTS_TOOL["name"]]
+        shown = (HINTS_TOOL["name"], QUIZ_TOOL["name"])
+        lookups = [b for b in tool_uses if b.name not in shown]
         for block in tool_uses:
+            if block.name == QUIZ_TOOL["name"]:
+                quiz = None if socratic else written_quiz(block.input)
+                if quiz is None:
+                    why = "Not in a Socratic session." if socratic else "No usable questions."
+                    results.append(tool_error(block.id, why))
+                    continue
+                yield {"type": "quiz", "quiz": quiz.model_dump()}
+                results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": "Shown."}
+                )
+                continue
             if block.name == HINTS_TOOL["name"]:
                 try:
                     hints = HintsInput.model_validate(block.input).hints
