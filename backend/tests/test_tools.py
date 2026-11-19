@@ -3,7 +3,7 @@ from fakes import FakeAnswerClient, text, thinking, tool_use
 from pdfs import filler, make_pdf
 
 from leqtern.ask import AskRequest, Turn, build_messages, stream_answer
-from leqtern.hints import Hints
+from leqtern.hints import Hints, OpenCard
 from leqtern.index import ChunkRecord, DocIndex, Entry, Section
 from leqtern.library import Library
 from leqtern.quiz import reading_so_far
@@ -346,3 +346,21 @@ async def test_hints_are_offered_without_documents_and_invalid_ones_go_back(tmp_
     assert [t["name"] for t in client.requests[0]["tools"]] == ["show_hints"]
     assert client.requests[1]["messages"][-1]["content"][0]["is_error"]
     assert [e["type"] for e in events] == ["hints", "done"]
+
+
+def test_a_question_carries_the_quiz_question_or_hint_on_show() -> None:
+    request = AskRequest(
+        topic="Calc",
+        messages=[
+            Turn(role="user", text="Hints?"),
+            Turn(role="assistant", text="", hints=Hints(items=["A", "B"], revealed=2)),
+            Turn(
+                role="user",
+                text="Why is x not y?",
+                open=OpenCard(kind="hint", number=2, of=2, text="B"),
+            ),
+        ],
+    )
+    content = build_messages(request)[-1]["content"]
+    assert content[0]["text"] == "[Open in the chat: hint 2 of 2 of your hints: B]"
+    assert content[1]["text"] == "Why is x not y?"

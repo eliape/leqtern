@@ -428,6 +428,7 @@
                 quiz={message.quiz}
                 docs={citable(index)}
                 onpick={(question, choice) => workspace.answerQuiz(topic.id, message.id, question, choice)}
+                onopen={(question) => (message.openCard = question)}
               />
             {:else if message.role === 'assistant'}
               <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
@@ -444,6 +445,7 @@
                 hints={message.hints}
                 docs={citable(index)}
                 onreveal={() => workspace.revealHint(topic.id, message.id)}
+                onopen={(card) => (message.openCard = card)}
               />
             {/if}
           </div>

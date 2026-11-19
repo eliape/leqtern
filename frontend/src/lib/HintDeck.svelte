@@ -6,16 +6,19 @@
     hints: Hints
     /** The reader turned over the next hint. */
     onreveal: () => void
+    /** The card on top changed. */
+    onopen?: (card: number) => void
     /** What the hints' citations can point at, as in answers. */
     docs?: CitableDocs
   }
 
-  let { hints, onreveal, docs }: Props = $props()
+  let { hints, onreveal, onopen, docs }: Props = $props()
 
   const total = $derived(hints.items.length)
   // Which card is on top: the newest one turned over, or the first while none are.
   const newest = () => Math.max(0, Math.min(hints.revealed, hints.items.length) - 1)
   let shown = $state(newest())
+  $effect(() => onopen?.(shown))
   // The next card face down can be looked at, but nothing past it.
   const last = $derived(Math.min(hints.revealed, total - 1))
   const faceDown = $derived(shown >= hints.revealed)

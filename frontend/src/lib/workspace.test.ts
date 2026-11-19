@@ -6,6 +6,7 @@ import {
   Workspace,
   askRequest,
   chatOf,
+  openCard,
   chatTitle,
   discussionRequest,
   discussions,
@@ -301,6 +302,32 @@ describe('Workspace.ask', () => {
       yield { type: 'text' as const, text: 'OK.' }
     })
     expect(requests[0].messages[1].hints).toEqual({ items: ['Look at the limits.', 'Substitute u = x².'], revealed: 2 })
+  })
+
+  it('sends the hint or quiz question on show with the next question', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'Hints?'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'hints' as const, hints: ['One', 'Two', 'Three'] }
+    })
+    const answer = chatOf(topic).messages[1]
+    // Nothing turned over yet: nothing is on show.
+    expect(openCard(chatOf(topic).messages)).toBeUndefined()
+    ws.revealHint(topic.id, answer.id)
+    ws.revealHint(topic.id, answer.id)
+    answer.openCard = 0
+    topic.draft = 'Why is x not y?'
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield { type: 'text' as const, text: 'Because.' }
+    })
+    expect(requests[0].messages[2].open).toEqual({ kind: 'hint', number: 1, of: 3, text: 'One' })
+    // A card face down is not on show, so the newest turned over one is.
+    answer.openCard = 2
+    expect(openCard(chatOf(topic).messages)?.number).toBe(2)
   })
 
   it('streams the answer into the chat and sends the attached context with the question', async () => {

@@ -3,7 +3,7 @@ Hints for an exercise: the answering model can show them as a deck of cards, fro
 nearly the solution, which the reader turns over one at a time.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +31,22 @@ class Hints(BaseModel):
 
     items: list[str]
     revealed: int = 0
+
+
+class OpenCard(BaseModel):
+    """A quiz question or hint on show in the chat when the reader asked."""
+
+    kind: Literal["quiz", "hint"]
+    number: int
+    of: int
+    text: str
+
+
+def open_text(card: OpenCard) -> str:
+    """Which card they were looking at, so "why not B?" is understood."""
+    what = "question" if card.kind == "quiz" else "hint"
+    where = "quiz" if card.kind == "quiz" else "hints"
+    return f"[Open in the chat: {what} {card.number} of {card.of} of your {where}: {card.text}]"
 
 
 def hints_text(hints: Hints) -> str:

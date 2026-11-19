@@ -17,7 +17,7 @@ from anthropic import AsyncAnthropic
 from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
 
-from .hints import HINTS_TOOL, Hints, HintsInput, answer_text
+from .hints import HINTS_TOOL, Hints, HintsInput, OpenCard, answer_text, open_text
 from .quiz import Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
 from .tools import TOOLS, Toolbox, ToolError, TopicDoc, catalogue, overview
 from .usage import UsageLog, call_from_response
@@ -210,6 +210,9 @@ class Turn(BaseModel):
     hints: Hints | None = Field(
         default=None, description="On the model's side: hints it showed, with how many were seen"
     )
+    open: OpenCard | None = Field(
+        default=None, description="On the reader's side: the quiz question or hint on show"
+    )
 
 
 # The models the reader can pick in the chat.
@@ -362,6 +365,8 @@ def build_messages(
                     # page would only distract. The model reads it when the question needs it.
                     content.append(text_block(PAGE_NOT_SHOWN.format(alias=alias)))
         ends_session = in_session and turn.mode is None
+        if turn.open:
+            content.append(text_block(open_text(turn.open)))
         content.append(
             text_block(
                 question_text(turn, starts_session=not in_session, ends_session=ends_session)

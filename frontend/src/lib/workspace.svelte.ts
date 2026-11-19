@@ -12,6 +12,7 @@ import {
   forgetRegister,
   type IndexStatus,
   type Hints,
+  type OpenCard,
   noteDiscussion,
   type QuizRecord,
   type RecommendationRequest,
@@ -62,6 +63,10 @@ export type ChatMessage = {
   quiz?: Quiz
   /** On the model's side: hints for an exercise, which the reader turns over one at a time. */
   hints?: Hints
+  /** On the model's side: which quiz question or hint card is on show. Not saved. */
+  openCard?: number
+  /** On the reader's side: the quiz question or hint they had open when they asked. */
+  open?: OpenCard
 }
 
 /**
@@ -669,7 +674,8 @@ export class Workspace {
     const { context, quote } = topic
     const chat = chatOf(topic)
     const mode = chat.mode !== 'normal' && { mode: chat.mode }
-    const question = { text: topic.draft.trim(), context, ...(quote && { quote }), ...mode }
+    const open = chat.mode === 'quiz' ? undefined : openCard(chat.messages)
+    const question = { text: topic.draft.trim(), context, ...(quote && { quote }), ...mode, ...(open && { open }) }
     topic.draft = ''
     topic.context = undefined
     topic.quote = undefined
@@ -799,7 +805,7 @@ export class Workspace {
   private async converse(
     topic: Topic,
     chat: Chat,
-    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode'>,
+    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode' | 'open'>,
     fill: (() => Promise<PageContext | undefined>) | undefined,
     respond: (answer: ChatMessage, request: AskRequest, signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
@@ -1154,7 +1160,7 @@ function savedMessage(message: ChatMessage): ChatMessage {
     const { id, role, status, mode } = message
     return { id, role, text: '', status, ...(mode && { mode }) }
   }
-  const { context, ...rest } = message
+  const { context, openCard: _open, ...rest } = message
   if (!context) return { ...rest }
   const { pageImage: _image, imagePages: _pages, pageTexts: _texts, ...spot } = context
   return { ...rest, context: { ...spot, pageTexts: [] } }
@@ -1279,6 +1285,28 @@ function turnKey(message: ChatMessage): string {
   return `${message.id}/${answered}${quiz.recommendation ? '+' : ''}`
 }
 
+/**
+ * The quiz question or turned-over hint on show in one of the last two answers, so a question
+ * like "why not B?" reaches the model with it. Undefined when none is.
+ */
+export function openCard(messages: ChatMessage[]): OpenCard | undefined {
+  const answers = messages.filter((m) => m.role === 'assistant').slice(-2).reverse()
+  const card = answers.find((m) => m.quiz || m.hints?.revealed)
+  if (card?.quiz) {
+    const { questions, picked } = card.quiz
+    const first = picked.findIndex((p) => p === null)
+    const i = card.openCard ?? (first === -1 ? questions.length : first)
+    const q = questions[i]
+    return q && { kind: 'quiz', number: i + 1, of: questions.length, text: q.question }
+  }
+  if (card?.hints) {
+    const { items, revealed } = card.hints
+    const i = Math.min(card.openCard ?? revealed - 1, revealed - 1)
+    return items[i] !== undefined ? { kind: 'hint', number: i + 1, of: items.length, text: items[i] } : undefined
+  }
+  return undefined
+}
+
 /** One message as the backend reads it. */
 function requestTurn(m: ChatMessage, withImages: boolean, serverId: (docId: string) => string | undefined): AskTurn {
   return {
@@ -1288,6 +1316,7 @@ function requestTurn(m: ChatMessage, withImages: boolean, serverId: (docId: stri
     ...(m.role === 'user' && m.mode && { mode: m.mode }),
     ...(m.quiz && { quiz: quizRecord(m.quiz) }),
     ...(m.hints && { hints: { items: m.hints.items, revealed: m.hints.revealed } }),
+    ...(m.role === 'user' && m.open && { open: m.open }),
   }
 }
 

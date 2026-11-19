@@ -25,7 +25,12 @@ export type AskTurn = {
   quiz?: QuizRecord
   /** On the model's side: hints it showed, with how many the reader turned over. */
   hints?: Hints
+  /** On the reader's side: the quiz question or hint they had open in the chat when asking. */
+  open?: OpenCard
 }
+
+/** A quiz question or a hint on show in the chat, as a question about it needs it. */
+export type OpenCard = { kind: 'quiz' | 'hint'; number: number; of: number; text: string }
 
 export type AskRequest = {
   topic: string
