@@ -2,7 +2,8 @@ import pytest
 from fakes import FakeAnswerClient, text, thinking, tool_use
 from pdfs import filler, make_pdf
 
-from leqtern.ask import AskRequest, Turn, stream_answer
+from leqtern.ask import AskRequest, Turn, build_messages, stream_answer
+from leqtern.hints import Hints
 from leqtern.index import ChunkRecord, DocIndex, Entry, Section
 from leqtern.library import Library
 from leqtern.quiz import reading_so_far
@@ -295,3 +296,53 @@ async def test_topic_docs_use_the_name_the_topic_gives_each_pdf(tmp_path) -> Non
     assert named[0].info.name == "Lecture notes.pdf"
     assert library.get(doc.id).name != "Lecture notes.pdf"
     assert topic_docs(library, indexer, [doc.id])[0].info.name == library.get(doc.id).name
+
+
+async def test_hints_end_the_answer_and_come_back_with_how_many_were_seen(topic) -> None:
+    client = FakeAnswerClient(
+        [
+            (
+                [text("Try these."), tool_use("h1", "show_hints", {"hints": ["Nudge", "More"]})],
+                "tool_use",
+            ),
+        ]
+    )
+    request = AskRequest(topic="Calc", messages=[Turn(role="user", text="Hint for ex. 3?")])
+    events = [e async for e in stream_answer(client, request, topic)]
+
+    assert [e["type"] for e in events] == ["text", "hints", "done"]
+    assert events[1]["hints"] == ["Nudge", "More"]
+    # Hints alone need no further round.
+    assert len(client.requests) == 1
+    assert any(t["name"] == "show_hints" for t in client.requests[0]["tools"])
+
+    later = AskRequest(
+        topic="Calc",
+        messages=[
+            Turn(role="user", text="Hint for ex. 3?"),
+            Turn(
+                role="assistant",
+                text="Try these.",
+                hints=Hints(items=["Nudge", "More"], revealed=1),
+            ),
+            Turn(role="user", text="Still stuck"),
+        ],
+    )
+    sent = build_messages(later)[1]["content"][0]["text"]
+    assert "turned over 1 of 2" in sent and "2. More" in sent
+
+
+async def test_hints_are_offered_without_documents_and_invalid_ones_go_back(tmp_path) -> None:
+    client = FakeAnswerClient(
+        [
+            ([tool_use("h1", "show_hints", {"hints": []})], "tool_use"),
+            ([tool_use("h2", "show_hints", {"hints": ["A"]})], "tool_use"),
+        ]
+    )
+    empty = Toolbox(Library(tmp_path), [])
+    request = AskRequest(topic="Calc", messages=[Turn(role="user", text="Hints?")])
+    events = [e async for e in stream_answer(client, request, empty)]
+
+    assert [t["name"] for t in client.requests[0]["tools"]] == ["show_hints"]
+    assert client.requests[1]["messages"][-1]["content"][0]["is_error"]
+    assert [e["type"] for e in events] == ["hints", "done"]

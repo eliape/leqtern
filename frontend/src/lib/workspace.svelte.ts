@@ -11,6 +11,7 @@ import {
   fetchRecommendation,
   forgetRegister,
   type IndexStatus,
+  type Hints,
   noteDiscussion,
   type QuizRecord,
   type RecommendationRequest,
@@ -59,6 +60,8 @@ export type ChatMessage = {
   thinkingSeconds?: number
   /** On the model's side: the quiz it wrote, which the reader clicks through. */
   quiz?: Quiz
+  /** On the model's side: hints for an exercise, which the reader turns over one at a time. */
+  hints?: Hints
 }
 
 /**
@@ -699,7 +702,8 @@ export class Workspace {
               continue
             }
             stopThinking()
-            if (event.type === 'text') answer.text += event.text
+            if (event.type === 'hints') answer.hints = { items: event.hints, revealed: 0 }
+            else if (event.type === 'text') answer.text += event.text
             else answer.steps = [...(answer.steps ?? []), event.text]
           }
         } finally {
@@ -707,6 +711,13 @@ export class Workspace {
         }
       })
     }
+  }
+
+  /** Turn over the next of an answer's hint cards. */
+  revealHint(topicId: string, messageId: string): void {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const hints = topic?.chats.flatMap((c) => c.messages).find((m) => m.id === messageId)?.hints
+    if (hints && hints.revealed < hints.items.length) hints.revealed++
   }
 
   /**
@@ -1261,7 +1272,8 @@ function docNames(
 }
 
 function turnKey(message: ChatMessage): string {
-  const { quiz } = message
+  const { quiz, hints } = message
+  if (hints) return `${message.id}/h${hints.revealed}`
   if (!quiz) return message.id
   const answered = quiz.picked.filter((p) => p !== null).length
   return `${message.id}/${answered}${quiz.recommendation ? '+' : ''}`
@@ -1275,6 +1287,7 @@ function requestTurn(m: ChatMessage, withImages: boolean, serverId: (docId: stri
     context: m.context && contextForRequest(m.context, withImages, serverId(m.context.docId)),
     ...(m.role === 'user' && m.mode && { mode: m.mode }),
     ...(m.quiz && { quiz: quizRecord(m.quiz) }),
+    ...(m.hints && { hints: { items: m.hints.items, revealed: m.hints.revealed } }),
   }
 }
 

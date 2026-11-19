@@ -10,6 +10,7 @@
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
+  import HintDeck from './HintDeck.svelte'
   import { streamFade } from './streamFade'
   import { type Chat, chatOf, chatTitle, type Topic, type Workspace } from './workspace.svelte'
 
@@ -437,6 +438,13 @@
               ></div>
             {:else if message.text}
               <span class="text">{message.text}</span>
+            {/if}
+            {#if message.hints?.items.length}
+              <HintDeck
+                hints={message.hints}
+                docs={citable(index)}
+                onreveal={() => workspace.revealHint(topic.id, message.id)}
+              />
             {/if}
           </div>
           {#if message.role === 'assistant' && message.status === 'error' && index === chat.messages.length - 1}

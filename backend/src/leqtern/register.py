@@ -24,6 +24,7 @@ from anthropic import AsyncAnthropic
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from .ask import AskRequest, Turn, describe
+from .hints import answer_text
 from .quiz import LETTERS, QuizRecord, score
 from .tools import terms
 from .usage import UsageLog, call_from_response
@@ -477,8 +478,8 @@ def transcript(turns: list[Turn]) -> str:
             lines.append(user_line(turn))
         elif turn.quiz:
             lines.append(f"Tutor: {quiz_summary(turn.quiz)}")
-        elif turn.text.strip():
-            lines.append(f"Tutor: {clip(turn.text)}")
+        elif turn.text.strip() or turn.hints:
+            lines.append(f"Tutor: {clip(answer_text(turn.text, turn.hints))}")
     return "\n\n".join(lines)
 
 
@@ -495,7 +496,8 @@ def unread(request: DiscussionRequest, register: Register) -> tuple[list[Turn], 
     turns = request.messages[: last_answer + 1]
     new = [i for i, t in enumerate(turns) if t.key not in seen]
     if not any(
-        turns[i].role == "assistant" and (turns[i].text.strip() or turns[i].quiz) for i in new
+        turns[i].role == "assistant" and (turns[i].text.strip() or turns[i].quiz or turns[i].hints)
+        for i in new
     ):
         return [], []
     start = new[0]

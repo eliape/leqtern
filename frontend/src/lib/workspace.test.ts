@@ -280,6 +280,29 @@ describe('Workspace.ask', () => {
     expect(requests[1].messages[1]).toEqual({ role: 'assistant', text: 'Because.' })
   })
 
+  it('keeps hints from an answer, turns them over one at a time and sends them back', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'Hint for exercise 2?'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'hints' as const, hints: ['Look at the limits.', 'Substitute u = x².'] }
+    })
+    const answer = chatOf(topic).messages[1]
+    expect(answer.hints).toEqual({ items: ['Look at the limits.', 'Substitute u = x².'], revealed: 0 })
+    ws.revealHint(topic.id, answer.id)
+    ws.revealHint(topic.id, answer.id)
+    ws.revealHint(topic.id, answer.id)
+    expect(answer.hints?.revealed).toBe(2)
+    topic.draft = 'Still stuck'
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield { type: 'text' as const, text: 'OK.' }
+    })
+    expect(requests[0].messages[1].hints).toEqual({ items: ['Look at the limits.', 'Substitute u = x².'], revealed: 2 })
+  })
+
   it('streams the answer into the chat and sends the attached context with the question', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

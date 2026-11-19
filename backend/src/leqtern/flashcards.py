@@ -43,6 +43,7 @@ from .dedup import (
     normalize,
     screen,
 )
+from .hints import answer_text
 from .quiz import quiz_text, results_text
 from .register import Note, Register, pick
 from .tools import TOOLS, Toolbox, ToolError, catalogue
@@ -178,8 +179,8 @@ def transcript(turns: list[Turn]) -> str:
             results = results_text(turn.quiz)
             if results:
                 lines.append(f"Student: {results}")
-        elif turn.text.strip():
-            lines.append(f"Tutor: {turn.text.strip()}")
+        elif turn.text.strip() or turn.hints:
+            lines.append(f"Tutor: {answer_text(turn.text, turn.hints)}")
     text = "\n\n".join(lines)
     if len(text) > MAX_TRANSCRIPT:
         text = "(Earlier part of the discussion left out.)\n\n…" + text[-MAX_TRANSCRIPT:]

@@ -23,6 +23,8 @@ export type AskTurn = {
   mode?: 'socratic' | 'quiz'
   /** On the model's side: a quiz it wrote, with how the reader did. */
   quiz?: QuizRecord
+  /** On the model's side: hints it showed, with how many the reader turned over. */
+  hints?: Hints
 }
 
 export type AskRequest = {
@@ -50,7 +52,10 @@ export type AskRequest = {
  * A piece of an answer's text, a piece of the summary of the model's thinking, or a lookup
  * the model made while answering.
  */
-export type AnswerEvent = { type: 'text' | 'thinking' | 'step'; text: string }
+export type AnswerEvent = { type: 'text' | 'thinking' | 'step'; text: string } | { type: 'hints'; hints: string[] }
+
+/** Hints the model showed for an exercise, and how many of them the reader has turned over. */
+export type Hints = { items: string[]; revealed: number }
 
 /** Something that streams an answer. `fetchAnswer` is the real one; tests pass fakes. */
 export type AnswerStream = (request: AskRequest, signal?: AbortSignal) => AsyncIterable<AnswerEvent>
@@ -80,8 +85,10 @@ export async function* fetchAnswer(
     buffered = done ? '' : lines.pop()!
     for (const line of lines) {
       if (!line.trim()) continue
-      const event = JSON.parse(line) as { type: string; text?: string; message?: string }
-      if ((event.type === 'text' || event.type === 'thinking' || event.type === 'step') && event.text)
+      const event = JSON.parse(line) as { type: string; text?: string; message?: string; hints?: unknown }
+      if (event.type === 'hints' && Array.isArray(event.hints))
+        yield { type: 'hints', hints: event.hints.filter((h): h is string => typeof h === 'string') }
+      else if ((event.type === 'text' || event.type === 'thinking' || event.type === 'step') && event.text)
         yield { type: event.type, text: event.text }
       else if (event.type === 'error') throw new Error(event.message ?? 'Something went wrong while answering.')
       else if (event.type === 'done') return

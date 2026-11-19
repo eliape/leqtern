@@ -15,8 +15,9 @@ from typing import Any, Literal
 
 from anthropic import AsyncAnthropic
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from .hints import HINTS_TOOL, Hints, HintsInput, answer_text
 from .quiz import Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
 from .tools import TOOLS, Toolbox, ToolError, TopicDoc, catalogue, overview
 from .usage import UsageLog, call_from_response
@@ -206,6 +207,9 @@ class Turn(BaseModel):
     quiz: QuizRecord | None = Field(
         default=None, description="On the model's side: the quiz it wrote, with how they did"
     )
+    hints: Hints | None = Field(
+        default=None, description="On the model's side: hints it showed, with how many were seen"
+    )
 
 
 # The models the reader can pick in the chat.
@@ -341,8 +345,9 @@ def build_messages(
                 results = results_text(turn.quiz)
                 if results:
                     messages.append({"role": "user", "content": [text_block(results)]})
-            elif turn.text.strip():
-                messages.append({"role": "assistant", "content": [text_block(turn.text)]})
+            elif turn.text.strip() or turn.hints:
+                text = answer_text(turn.text, turn.hints)
+                messages.append({"role": "assistant", "content": [text_block(text)]})
             continue
         content: list[dict[str, Any]] = []
         if turn.context:
@@ -570,6 +575,10 @@ def record_stopped(
     usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True, **details))
 
 
+def tool_error(tool_use_id: str, message: str) -> dict[str, Any]:
+    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": message, "is_error": True}
+
+
 async def stream_answer(
     client: AsyncAnthropic,
     request: AskRequest,
@@ -595,7 +604,7 @@ async def stream_answer(
         for block in (notes, topic_map):
             if block:
                 messages[-1]["content"].insert(0, block)
-    tools = TOOLS if toolbox.docs else []
+    tools = [*(TOOLS if toolbox.docs else []), HINTS_TOOL]
     parts = (
         question_parts(messages[-1]["content"], map=[topic_map], notes=[notes])
         if messages and messages[-1]["role"] == "user"
@@ -682,20 +691,30 @@ async def stream_answer(
             break
 
         results = []
+        lookups = [b for b in tool_uses if b.name != HINTS_TOOL["name"]]
         for block in tool_uses:
+            if block.name == HINTS_TOOL["name"]:
+                try:
+                    hints = HintsInput.model_validate(block.input).hints
+                except ValidationError as error:
+                    results.append(
+                        tool_error(block.id, f"Invalid hints: {error.errors()[0]['msg']}")
+                    )
+                    continue
+                yield {"type": "hints", "hints": hints}
+                results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": "Shown."}
+                )
+                continue
             yield {"type": "step", "text": toolbox.describe(block.name, block.input)}
             try:
                 content = await toolbox.run(block.name, block.input)
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": content})
             except ToolError as error:
-                results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": str(error),
-                        "is_error": True,
-                    }
-                )
+                results.append(tool_error(block.id, str(error)))
+        if not lookups and not any(r.get("is_error") for r in results):
+            # Hints end the answer: another round would only cost a closing line.
+            break
         messages.append({"role": "assistant", "content": final.content})
         messages.append({"role": "user", "content": results})
 
