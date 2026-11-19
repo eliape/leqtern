@@ -231,15 +231,13 @@ describe('ChatPanel', () => {
 
   it('shows a quiz to click through, with feedback on each answer and a summary at the end', async () => {
     const { workspace, topic, context, panel } = setup()
-    workspace.attachContext(topic.id, context, 'quiz')
+    workspace.quizOn(topic.id, context)
     await tick()
     const box = panel.getByLabelText('Ask a question')
-    expect(box.closest('form')).toHaveClass('quiz')
-    expect(box).toHaveAttribute('placeholder', 'What should the quiz cover? (optional)')
-    expect(panel.getByRole('button', { name: 'Mode: Quiz' })).toBeInTheDocument()
+    expect(box).toHaveValue('Quiz me on this')
+    expect(panel.getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
     let reviewed!: (text: string) => void
-    const api = {
-      create: async () => ({
+    const written = {
         title: 'Derivatives',
         questions: [
           {
@@ -251,16 +249,18 @@ describe('ChatPanel', () => {
           },
           { question: 'What is dx?', choices: ['A small change', 'A constant'], answer: 0, explanation: 'An infinitesimal.' },
         ],
-      }),
-      recommend: () => new Promise<string>((resolve) => (reviewed = resolve)),
-    }
-    await fireEvent.input(box, { target: { value: 'the power rule' } })
-    workspace.quizApi = api
-    await workspace.ask(topic.id)
+      }
+    await fireEvent.input(box, { target: { value: 'Quiz me on the power rule' } })
+    workspace.quizApi = { recommend: () => new Promise<string>((resolve) => (reviewed = resolve)) }
+    await workspace.ask(topic.id, undefined, async function* () {
+      yield { type: 'text' as const, text: 'Here is a quiz.' }
+      yield { type: 'quiz' as const, quiz: written }
+    })
     await tick()
-    const [asked] = panel.getByRole('log').querySelectorAll('.message')
-    expect(asked).toHaveTextContent('Quiz')
-    expect(asked).toHaveTextContent('the power rule')
+    const [asked, answer] = panel.getByRole('log').querySelectorAll('.message')
+    expect(asked).toHaveTextContent('Quiz me on the power rule')
+    expect(answer).toHaveTextContent('Here is a quiz.')
+    expect(answer).toHaveClass('quiz')
 
     const quiz = within(panel.getByRole('group', { name: 'Quiz: Derivatives' }))
     expect(quiz.getByText('Question 1 of 2')).toBeInTheDocument()
@@ -321,7 +321,7 @@ describe('ChatPanel', () => {
     await fireEvent.click(mode)
     const menu = panel.getByRole('menu', { name: 'Mode' })
     const items = within(menu).getAllByRole('menuitemradio')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Normal', 'Socratic', 'Quiz'])
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Normal', 'Socratic'])
     expect(items[0]).toHaveAttribute('aria-checked', 'true')
     expect(items[1].querySelector('svg')).not.toBeNull()
     await fireEvent.click(items[1])

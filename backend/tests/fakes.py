@@ -43,6 +43,8 @@ class FakeStream:
                     yield SimpleNamespace(type="text", text=block.text)
                 elif block.type == "thinking":
                     yield SimpleNamespace(type="thinking", thinking=block.thinking)
+                elif block.type == "tool_use":
+                    yield SimpleNamespace(type="content_block_start", content_block=block)
 
         return events()
 

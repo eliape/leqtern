@@ -311,12 +311,14 @@
   const latestPick: Record<string, number> = {}
   const capturing: Record<string, Promise<unknown>> = {}
 
-  function onPick(docId: string, pick: Pick, mode: Mode = 'normal') {
+  function onPick(docId: string, pick: Pick, mode: Mode | 'quiz' = 'normal') {
     const picked = workspace.docs[docId]
     const topic = workspace.topicOf(docId)
     if (!picked || !topic) return
     const n = (latestPick[topic.id] = (latestPick[topic.id] ?? 0) + 1)
-    workspace.attachContext(topic.id, { ...pick, docId, docName: picked.name, pageTexts: [] }, mode)
+    const context = { ...pick, docId, docName: picked.name, pageTexts: [] }
+    if (mode === 'quiz') workspace.quizOn(topic.id, context)
+    else workspace.attachContext(topic.id, context, mode)
     setChatOpen(true, topic.id)
     tick().then(() => chatPanel?.focus())
     capturing[topic.id] = (panes[docId]?.capture(pick) ?? Promise.resolve(undefined))
@@ -345,8 +347,9 @@
 
   /**
    * What the menu offers for a right-clicked spot or selection. Each of Ask, Socratic and
-   * Quiz me attaches it to the chat, as a click with the Click to ask tool does, in the mode
-   * it is for: Ask waits for a question, Socratic and Quiz me for what to focus on, if anything.
+   * Quiz me attaches it to the chat, as a click with the Click to ask tool does: Ask waits for
+   * a question, Socratic for what to focus on, if anything, and Quiz me puts "Quiz me on this"
+   * in the box, to send or to add what to focus on.
    */
   function menuItems({ docId, pick }: MenuTarget): MenuItem[] {
     const items: MenuItem[] = [

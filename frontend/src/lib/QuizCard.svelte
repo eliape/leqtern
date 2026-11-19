@@ -7,11 +7,13 @@
     quiz: Quiz
     /** The reader picked a choice for a question. Each question is answered once. */
     onpick: (question: number, choice: number) => void
+    /** The question on show changed (the number of questions for the results). */
+    onopen?: (question: number) => void
     /** What the quiz's citations can point at, as in answers. */
     docs?: CitableDocs
   }
 
-  let { quiz, onpick, docs }: Props = $props()
+  let { quiz, onpick, onopen, docs }: Props = $props()
 
   const LETTERS = 'ABCDEFGH'
   const total = $derived(quiz.questions.length)
@@ -23,6 +25,7 @@
     return i === -1 ? quiz.questions.length : i
   }
   let step = $state(firstOpen())
+  $effect(() => onopen?.(step))
 
   let right = $derived(quiz.questions.filter((q, i) => quiz.picked[i] === q.answer).length)
   let question = $derived(quiz.questions[step])

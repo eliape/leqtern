@@ -26,10 +26,4 @@ export const MODES: Option<Mode>[] = [
     title: 'Asks you questions that lead you to the answer, instead of explaining',
     icon: SOCRATIC_ICON,
   },
-  {
-    value: 'quiz',
-    label: 'Quiz',
-    title: 'Writes a multiple-choice quiz for you to click through',
-    icon: QUIZ_ICON,
-  },
 ]

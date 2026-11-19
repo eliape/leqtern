@@ -2,7 +2,6 @@ import {
   type AnswerStream,
   type AskRequest,
   type AskTurn,
-  createQuiz,
   type DiscussionRequest,
   fetchAnswer,
   fetchChatTitle,
@@ -11,6 +10,8 @@ import {
   fetchRecommendation,
   forgetRegister,
   type IndexStatus,
+  type Hints,
+  type OpenCard,
   noteDiscussion,
   type QuizRecord,
   type RecommendationRequest,
@@ -59,6 +60,12 @@ export type ChatMessage = {
   thinkingSeconds?: number
   /** On the model's side: the quiz it wrote, which the reader clicks through. */
   quiz?: Quiz
+  /** On the model's side: hints for an exercise, which the reader turns over one at a time. */
+  hints?: Hints
+  /** On the model's side: which quiz question or hint card is on show. Not saved. */
+  openCard?: number
+  /** On the reader's side: the quiz question or hint they had open when they asked. */
+  open?: OpenCard
 }
 
 /**
@@ -86,13 +93,15 @@ const realIndexApi: IndexApi = {
   retry: (id) => retryIndex(id),
 }
 
-/** The backend calls quizzes use. Tests pass fakes. */
+/** Where notes on what to review after a quiz come from. Tests pass fakes. */
 export type QuizApi = {
-  create: (request: AskRequest, signal?: AbortSignal) => Promise<WrittenQuiz>
   recommend: (request: RecommendationRequest) => Promise<string | null>
 }
 
-const realQuizApi: QuizApi = { create: (r, signal) => createQuiz(r, signal), recommend: (r) => fetchRecommendation(r) }
+/** What Quiz me in the right-click menu puts in the question box. */
+export const QUIZ_ME = 'Quiz me on this'
+
+const realQuizApi: QuizApi = { recommend: (r) => fetchRecommendation(r) }
 
 /**
  * The backend calls the topics' registers use: `note` has Haiku note what is new in a discussion
@@ -114,11 +123,11 @@ export type FlashcardSource =
   | { kind: 'chat'; chatId: string; messageId: string }
 
 /**
- * How a topic's chat answers: `normal` answers questions; `socratic` has the model
- * ask the reader questions that lead them to the answer instead of explaining;
- * `quiz` has it write a multiple-choice quiz to click through.
+ * How a topic's chat answers: `normal` answers questions (and writes a quiz or hints when
+ * asked); `socratic` has the model ask the reader questions that lead them to the answer
+ * instead of explaining.
  */
-export type Mode = 'normal' | 'socratic' | 'quiz'
+export type Mode = 'normal' | 'socratic'
 
 /**
  * One discussion in a topic: its messages and how it answers (`mode`, picked in the chat or
@@ -494,6 +503,19 @@ export class Workspace {
     chatOf(topic).mode = mode
   }
 
+  /**
+   * Quiz me from the right-click menu: a new discussion in Normal mode with the spot attached
+   * and "Quiz me on this" in the box, ready to send or to say what to focus on.
+   */
+  quizOn(topicId: string, context: PageContext) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic) return
+    this.newChat(topicId)
+    topic.context = context
+    chatOf(topic).mode = 'normal'
+    if (!topic.draft.trim()) topic.draft = QUIZ_ME
+  }
+
   /** Replace the attached spot with the same spot and its images, once they are rendered. */
   fillContext(topicId: string, context: PageContext) {
     const topic = this.topics.find((t) => t.id === topicId)
@@ -638,75 +660,75 @@ export class Workspace {
 
   /**
    * Whether the topic's draft can be sent now: not while an answer is arriving, and not
-   * blank, except to start a quiz, or a Socratic session about the attached spot, where
-   * what to focus on is optional.
+   * blank, except to start a Socratic session about the attached spot, where what to focus
+   * on is optional.
    */
   canSend(topicId: string): boolean {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || this.isAnswering(topicId)) return false
     const { mode } = chatOf(topic)
-    return !!topic.draft.trim() || mode === 'quiz' || (mode === 'socratic' && !!topic.context)
+    return !!topic.draft.trim() || (mode === 'socratic' && !!topic.context)
   }
 
   /**
    * Send the topic's draft as a question, with the attached context or, when
    * nothing is attached, whatever `fallback` gives (the open page), and stream
-   * the answer into the chat. In Socratic mode the model replies with questions;
-   * in Quiz mode it writes a quiz instead, about what the draft asks it to focus on, and the
-   * chat goes back to Normal. Ignored when the draft can't be sent (see canSend).
+   * the answer into the chat. In Socratic mode the model replies with questions. Ignored
+   * when the draft can't be sent (see canSend).
    */
   async ask(
     topicId: string,
     fallback?: () => Promise<PageContext | undefined>,
     stream: AnswerStream = fetchAnswer,
-    quizApi: QuizApi = this.quizApi,
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || !this.canSend(topicId)) return
     const { context, quote } = topic
     const chat = chatOf(topic)
     const mode = chat.mode !== 'normal' && { mode: chat.mode }
-    const question = { text: topic.draft.trim(), context, ...(quote && { quote }), ...mode }
+    const open = openCard(chat.messages)
+    const question = { text: topic.draft.trim(), context, ...(quote && { quote }), ...mode, ...(open && { open }) }
     topic.draft = ''
     topic.context = undefined
     topic.quote = undefined
-    const fill = context ? undefined : fallback
-    if (chat.mode === 'quiz') {
-      chat.mode = 'normal'
-      await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
-        const written = await quizApi.create(request, signal)
-        answer.quiz = { ...written, picked: written.questions.map(() => null) }
-      })
-    } else {
-      await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
-        // When the current stretch of thinking began; the model can think again after a lookup.
-        let thinkingSince: number | undefined
-        const stopThinking = () => {
-          if (thinkingSince === undefined) return
-          const seconds = (answer.thinkingSeconds ?? 0) + (Date.now() - thinkingSince) / 1000
-          answer.thinkingSeconds = Math.round(seconds * 10) / 10
-          thinkingSince = undefined
-        }
-        try {
-          for await (const event of stream(request, signal)) {
-            if (signal.aborted) break
-            if (event.type === 'thinking') {
-              if (thinkingSince === undefined) {
-                thinkingSince = Date.now()
-                if (answer.thinking) answer.thinking += '\n\n'
-              }
-              answer.thinking = (answer.thinking ?? '') + event.text
-              continue
+  const fill = context ? undefined : fallback
+    await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
+      // When the current stretch of thinking began; the model can think again after a lookup.
+      let thinkingSince: number | undefined
+      const stopThinking = () => {
+        if (thinkingSince === undefined) return
+        const seconds = (answer.thinkingSeconds ?? 0) + (Date.now() - thinkingSince) / 1000
+        answer.thinkingSeconds = Math.round(seconds * 10) / 10
+        thinkingSince = undefined
+      }
+      try {
+        for await (const event of stream(request, signal)) {
+          if (signal.aborted) break
+          if (event.type === 'thinking') {
+            if (thinkingSince === undefined) {
+              thinkingSince = Date.now()
+              if (answer.thinking) answer.thinking += '\n\n'
             }
-            stopThinking()
-            if (event.type === 'text') answer.text += event.text
-            else answer.steps = [...(answer.steps ?? []), event.text]
+            answer.thinking = (answer.thinking ?? '') + event.text
+            continue
           }
-        } finally {
           stopThinking()
+          if (event.type === 'hints') answer.hints = { items: event.hints, revealed: 0 }
+          else if (event.type === 'quiz') answer.quiz = { ...event.quiz, picked: event.quiz.questions.map(() => null) }
+          else if (event.type === 'text') answer.text += event.text
+          else answer.steps = [...(answer.steps ?? []), event.text]
         }
-      })
-    }
+      } finally {
+        stopThinking()
+      }
+    })
+  }
+
+  /** Turn over the next of an answer's hint cards. */
+  revealHint(topicId: string, messageId: string): void {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const hints = topic?.chats.flatMap((c) => c.messages).find((m) => m.id === messageId)?.hints
+    if (hints && hints.revealed < hints.items.length) hints.revealed++
   }
 
   /**
@@ -788,7 +810,7 @@ export class Workspace {
   private async converse(
     topic: Topic,
     chat: Chat,
-    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode'>,
+    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode' | 'open'>,
     fill: (() => Promise<PageContext | undefined>) | undefined,
     respond: (answer: ChatMessage, request: AskRequest, signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
@@ -850,7 +872,6 @@ export class Workspace {
   ) {
     chat.messages = chat.messages.filter((m) => m.id !== question.id && m.id !== answer.id)
     if (!chat.messages.length) chat.title = undefined
-    if (asked.mode === 'quiz') chat.mode = 'quiz'
     const typed = topic.draft.trim()
     topic.draft = [asked.text, typed].filter(Boolean).join('\n\n')
     topic.context ??= asked.context
@@ -1125,7 +1146,8 @@ function restoredScope(saved: SavedTopic): Pick<Topic, 'scope'> {
 }
 
 function validMode(mode: unknown): Mode {
-  return mode === 'socratic' || mode === 'quiz' ? mode : 'normal'
+  // Quiz was a mode once; quizzes are now asked for in Normal.
+  return mode === 'socratic' ? mode : 'normal'
 }
 
 function isSavedWorkspace(value: unknown): value is SavedWorkspace {
@@ -1143,7 +1165,7 @@ function savedMessage(message: ChatMessage): ChatMessage {
     const { id, role, status, mode } = message
     return { id, role, text: '', status, ...(mode && { mode }) }
   }
-  const { context, ...rest } = message
+  const { context, openCard: _open, ...rest } = message
   if (!context) return { ...rest }
   const { pageImage: _image, imagePages: _pages, pageTexts: _texts, ...spot } = context
   return { ...rest, context: { ...spot, pageTexts: [] } }
@@ -1261,10 +1283,33 @@ function docNames(
 }
 
 function turnKey(message: ChatMessage): string {
-  const { quiz } = message
+  const { quiz, hints } = message
+  if (hints) return `${message.id}/h${hints.revealed}`
   if (!quiz) return message.id
   const answered = quiz.picked.filter((p) => p !== null).length
   return `${message.id}/${answered}${quiz.recommendation ? '+' : ''}`
+}
+
+/**
+ * The quiz question or turned-over hint on show in one of the last two answers, so a question
+ * like "why not B?" reaches the model with it. Undefined when none is.
+ */
+export function openCard(messages: ChatMessage[]): OpenCard | undefined {
+  const answers = messages.filter((m) => m.role === 'assistant').slice(-2).reverse()
+  const card = answers.find((m) => m.quiz || m.hints?.revealed)
+  if (card?.quiz) {
+    const { questions, picked } = card.quiz
+    const first = picked.findIndex((p) => p === null)
+    const i = card.openCard ?? (first === -1 ? questions.length : first)
+    const q = questions[i]
+    return q && { kind: 'quiz', number: i + 1, of: questions.length, text: q.question }
+  }
+  if (card?.hints) {
+    const { items, revealed } = card.hints
+    const i = Math.min(card.openCard ?? revealed - 1, revealed - 1)
+    return items[i] !== undefined ? { kind: 'hint', number: i + 1, of: items.length, text: items[i] } : undefined
+  }
+  return undefined
 }
 
 /** One message as the backend reads it. */
@@ -1275,6 +1320,8 @@ function requestTurn(m: ChatMessage, withImages: boolean, serverId: (docId: stri
     context: m.context && contextForRequest(m.context, withImages, serverId(m.context.docId)),
     ...(m.role === 'user' && m.mode && { mode: m.mode }),
     ...(m.quiz && { quiz: quizRecord(m.quiz) }),
+    ...(m.hints && { hints: { items: m.hints.items, revealed: m.hints.revealed } }),
+    ...(m.role === 'user' && m.open && { open: m.open }),
   }
 }
 

@@ -12,6 +12,8 @@
   /* Marks quizzes in the chat. */
   --quiz: #0f7b6c;
   --right: #1a7f37;
+  /* Marks hint cards in the chat. */
+  --hint: #9a6700;
   --viewer-bg: #e8eaed;
   --sidebar-strip: 3rem;
   --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.22);
@@ -44,6 +46,7 @@
   --socratic: #ab7df8;
   --quiz: #3fb8a5;
   --right: #3fb950;
+  --hint: #d29922;
   --viewer-bg: #2b2f36;
   --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.55);
   --sidebar-bg: #161b22;
@@ -67,6 +70,7 @@
     --socratic: #ab7df8;
     --quiz: #3fb8a5;
     --right: #3fb950;
+    --hint: #d29922;
     --viewer-bg: #2b2f36;
     --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.55);
     --sidebar-bg: #161b22;

@@ -10,6 +10,7 @@
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
+  import HintDeck from './HintDeck.svelte'
   import { streamFade } from './streamFade'
   import { type Chat, chatOf, chatTitle, type Topic, type Workspace } from './workspace.svelte'
 
@@ -138,12 +139,11 @@
   }
 
   /**
-   * What the question box asks for. A quiz, or a Socratic session about the attached spot,
-   * starts with what to focus on, which is optional; once the model has asked a Socratic
-   * question, the box takes the reader's answer.
+   * What the question box asks for. A Socratic session about the attached spot starts with
+   * what to focus on, which is optional; once the model has asked a Socratic question, the
+   * box takes the reader's answer.
    */
   function placeholder(t: Topic, c: Chat) {
-    if (c.mode === 'quiz') return 'What should the quiz cover? (optional)'
     if (c.mode === 'socratic' && t.context) return 'What should it focus on? (optional)'
     if (c.mode === 'socratic' && c.messages.at(-1)?.mode === 'socratic') return 'Answer, or ask for a hint…'
     return t.context ? `Ask about ${contextLabel(t.context)}…` : 'Ask a question…'
@@ -380,7 +380,7 @@
           <div
             class="message {message.role}"
             class:socratic={message.role === 'assistant' && message.mode === 'socratic'}
-            class:quiz={message.role === 'assistant' && message.mode === 'quiz'}
+            class:quiz={message.role === 'assistant' && (message.mode === 'quiz' || !!message.quiz)}
             class:error={message.status === 'error'}
             class:waiting={message.status === 'streaming' && !message.text}
           >
@@ -422,21 +422,33 @@
               <span class="thinking">{message.mode === 'quiz' ? 'Writing a quiz…' : 'Thinking…'}</span>
             {:else if message.status === 'streaming' && !message.text}
               <!-- Still thinking: the row above says so. -->
-            {:else if message.quiz}
+            {:else if message.role === 'assistant'}
+              {#if message.text || !message.quiz}
+                <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
+                <!-- New words fade in as they stream. -->
+                <div
+                  class="text markdown"
+                  use:streamFade={{ html: renderMarkdown(message.text, citable(index)), live: message.status === 'streaming' }}
+                ></div>
+              {/if}
+            {:else if message.text}
+              <span class="text">{message.text}</span>
+            {/if}
+            {#if message.quiz}
               <QuizCard
                 quiz={message.quiz}
                 docs={citable(index)}
                 onpick={(question, choice) => workspace.answerQuiz(topic.id, message.id, question, choice)}
+                onopen={(question) => (message.openCard = question)}
               />
-            {:else if message.role === 'assistant'}
-              <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
-              <!-- New words fade in as they stream. -->
-              <div
-                class="text markdown"
-                use:streamFade={{ html: renderMarkdown(message.text, citable(index)), live: message.status === 'streaming' }}
-              ></div>
-            {:else if message.text}
-              <span class="text">{message.text}</span>
+            {/if}
+            {#if message.hints?.items.length}
+              <HintDeck
+                hints={message.hints}
+                docs={citable(index)}
+                onreveal={() => workspace.revealHint(topic.id, message.id)}
+                onopen={(card) => (message.openCard = card)}
+              />
             {/if}
           </div>
           {#if message.role === 'assistant' && message.status === 'error' && index === chat.messages.length - 1}
@@ -523,7 +535,7 @@
         </p>
       {/if}
 
-      <form class="composer" class:socratic={chat.mode === 'socratic'} class:quiz={chat.mode === 'quiz'} onsubmit={send}>
+      <form class="composer" class:socratic={chat.mode === 'socratic'} onsubmit={send}>
         {#if topic.context}
           {@const context = topic.context}
           <div class="attached" aria-label="Attached to your question">
@@ -1260,13 +1272,6 @@
   .composer.socratic:focus-within {
     border-color: var(--socratic);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--socratic) 22%, transparent);
-  }
-  .composer.quiz {
-    border-color: color-mix(in srgb, var(--quiz) 45%, var(--border));
-  }
-  .composer.quiz:focus-within {
-    border-color: var(--quiz);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--quiz) 22%, transparent);
   }
 
   .input {
