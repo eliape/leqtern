@@ -8,6 +8,7 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -83,6 +84,12 @@ class ChunkIndex(BaseModel):
     references: list[Reference]
 
 
+class HeadingFix(BaseModel):
+    title: str = Field(description="The heading exactly as it is listed")
+    new_title: str = Field(description="How it should read, in the style of the others")
+    level: int = Field(description="The level it should have")
+
+
 class DocSummary(BaseModel):
     title: str = Field(description="The document's title")
     kind: DocKind = Field(
@@ -94,6 +101,7 @@ class DocSummary(BaseModel):
     summary: str = Field(
         description="Three to five sentences: what it is, what it covers, for whom"
     )
+    heading_fixes: list[HeadingFix] = []
 
 
 class ChunkRecord(BaseModel):
@@ -123,9 +131,9 @@ CHUNK_PROMPT = """\
 These are pages {start}–{end} of "{name}" ({count} pages in all). Index them so that \
 someone answering questions about the document can find where things are.
 
-- sections: every chapter, section and subsection that appears or continues on these pages, \
-with the PDF page numbers it spans here and how far down its start page the heading is \
-(top). A section that started earlier and continues here is listed again with its title.
+- sections: every chapter, section and subsection whose heading is printed on these pages, \
+in reading order, with the PDF page numbers it spans here and how far down its start page \
+the heading is (top). Leave out sections continuing from earlier pages.
 - entries: key terms, acronyms, definitions, numbered or important equations, figures and \
 tables, each with the PDF pages it is on. Skip passing mentions.
 - references: explicit pointers to other parts of this document or to other works, such as \
@@ -136,7 +144,12 @@ printed on the pages. Be brief: one line per summary or description."""
 
 SUMMARY_PROMPT = """\
 Below is an index of "{name}" ({count} pages), written a few pages at a time. Give the \
-document's title, what kind of document it is, and a short summary of the whole document."""
+document's title, what kind of document it is, and a short summary of the whole document.
+
+Also list heading_fixes: headings in the Sections list written differently from the others \
+at their level (numbering, capitals, punctuation), such as "IV SPACETIME" among chapters \
+like "III. Relativistic Optics", or at the wrong level. Leave headings that rightly differ, \
+like an appendix or index. List nothing when the headings are consistent."""
 
 
 def chunk_ranges(page_count: int, size: int = PAGES_PER_CHUNK) -> list[tuple[int, int]]:
@@ -191,10 +204,24 @@ def clamp_chunk(chunk: ChunkIndex, start: int, end: int) -> ChunkIndex:
     return chunk
 
 
-def merge_sections(sections: list[Section]) -> list[Section]:
-    """Join a section that runs across chunk boundaries into one entry."""
+# A heading the model marks as carried over, like "Exercises III (continued)", rather than
+# one printed on the page. Ends are worked out from the next heading instead.
+CONTINUED = re.compile(r"\(\s*cont(inued|\.)", re.IGNORECASE)
+
+
+def merge_sections(sections: list[Section], page_count: int | None = None) -> list[Section]:
+    """
+    One entry per section, in reading order: by page, then by how far down it the heading
+    is (the model's own order where that isn't known). A section that runs across chunk
+    boundaries is joined into one entry. With `page_count`, each section ends where the
+    next one at its level or above begins.
+    """
     merged: list[Section] = []
-    for s in sorted(sections, key=lambda s: (s.start_page, s.level)):
+    ordered = sorted(
+        (s for s in sections if not CONTINUED.search(s.title)),
+        key=lambda s: (s.start_page, s.top if s.top is not None else 0.0),
+    )
+    for s in ordered:
         same = next(
             (
                 m
@@ -211,7 +238,30 @@ def merge_sections(sections: list[Section]) -> list[Section]:
                 same.summary = f"{same.summary} {s.summary}".strip()
         else:
             merged.append(s.model_copy())
+    if page_count:
+        set_ends(merged, page_count)
     return merged
+
+
+def set_ends(sections: list[Section], page_count: int) -> None:
+    """End each section where the next one at its level or above starts (on that page when
+    its heading is further down it), or at the last page."""
+    for i, s in enumerate(sections):
+        after = next((n for n in sections[i + 1 :] if n.level <= s.level), None)
+        if after is None:
+            s.end_page = page_count
+        else:
+            shared = after.top is None or after.top > 0.15
+            s.end_page = max(s.start_page, after.start_page if shared else after.start_page - 1)
+
+
+def apply_heading_fixes(sections: list[Section], fixes: list[HeadingFix]) -> None:
+    """Rename and re-level the headings the summary pass found out of step with the rest."""
+    by_title = {f.title.strip().lower(): f for f in fixes if f.new_title.strip()}
+    for s in sections:
+        fix = by_title.get(s.title.strip().lower())
+        if fix:
+            s.title, s.level = fix.new_title.strip(), min(max(fix.level, 1), 4)
 
 
 def merge_entries(entries: list[Entry]) -> list[Entry]:
@@ -403,7 +453,7 @@ class Indexer:
                     ChunkRecord(start_page=start, end_page=end, summary=chunk.summary)
                 )
                 index.chunks.sort(key=lambda c: c.start_page)
-                index.sections = merge_sections([*index.sections, *chunk.sections])
+                index.sections = merge_sections([*index.sections, *chunk.sections], doc.page_count)
                 index.entries = merge_entries([*index.entries, *chunk.entries])
                 index.references = sorted(
                     [*index.references, *chunk.references], key=lambda r: r.page
@@ -418,6 +468,8 @@ class Indexer:
         if failed:
             raise failed
         summary = await self.summarize(client, doc, index)
+        apply_heading_fixes(index.sections, summary.heading_fixes)
+        set_ends(index.sections, doc.page_count)
         index.title, index.summary, index.complete = summary.title, summary.summary, True
         index.kind = summary.kind
         self._save(index)

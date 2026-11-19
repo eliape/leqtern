@@ -13,8 +13,10 @@ from leqtern.index import (
     DocIndex,
     DocSummary,
     Entry,
+    HeadingFix,
     Indexer,
     Section,
+    apply_heading_fixes,
     chunk_ranges,
     clamp_chunk,
     merge_entries,
@@ -42,6 +44,49 @@ def test_joins_sections_that_cross_chunk_boundaries() -> None:
         ("2.1 The chain rule", 22, 24),
     ]
     assert merged[0].summary == "Rates. Rules."
+
+
+def test_orders_sections_by_where_their_headings_are() -> None:
+    sections = [
+        Section(title="3 Tensors", level=1, start_page=13, end_page=13, top=0.4, summary=""),
+        Section(title="2.5 Regions", level=2, start_page=13, end_page=13, top=0.05, summary=""),
+        Section(title="2 Lorentz", level=1, start_page=5, end_page=12, summary=""),
+    ]
+    merged = merge_sections(sections, page_count=30)
+    assert [(s.title, s.end_page) for s in merged] == [
+        ("2 Lorentz", 13),
+        ("2.5 Regions", 13),
+        ("3 Tensors", 30),
+    ]
+
+
+def test_drops_headings_marked_as_continued() -> None:
+    sections = [
+        Section(title="Exercises III", level=2, start_page=40, end_page=40, summary=""),
+        Section(title="Exercises III (continued)", level=1, start_page=41, end_page=42, summary=""),
+        Section(title="Continued fractions", level=2, start_page=43, end_page=44, summary=""),
+    ]
+    assert [s.title for s in merge_sections(sections)] == ["Exercises III", "Continued fractions"]
+
+
+def test_applies_heading_fixes_from_the_summary() -> None:
+    sections = [
+        Section(title="III. Relativistic Optics", level=1, start_page=1, end_page=1, summary=""),
+        Section(title="IV SPACETIME", level=1, start_page=2, end_page=2, summary=""),
+        Section(title="Exercises IV", level=1, start_page=3, end_page=3, summary=""),
+    ]
+    apply_heading_fixes(
+        sections,
+        [
+            HeadingFix(title="IV SPACETIME", new_title="IV. Spacetime", level=1),
+            HeadingFix(title="exercises iv", new_title="Exercises IV", level=2),
+        ],
+    )
+    assert [(s.title, s.level) for s in sections] == [
+        ("III. Relativistic Optics", 1),
+        ("IV. Spacetime", 1),
+        ("Exercises IV", 2),
+    ]
 
 
 def test_merges_entries_by_kind_and_name() -> None:
