@@ -1,4 +1,4 @@
-.PHONY: install dev test check costs
+.PHONY: install dev test check costs reindex
 
 install:
 	cd backend && uv sync --extra embeddings
@@ -17,3 +17,6 @@ check:
 
 costs:
 	cd backend && uv run python -m leqtern.costs $(ARGS)
+
+reindex:
+	cd backend && uv run python -m leqtern.reindex $(ARGS)
