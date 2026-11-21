@@ -775,6 +775,16 @@ export class Workspace {
     if (isTyped(quiz, question)) await this.review(at, api)
   }
 
+  /** Show the next of a quiz question's hints, while it is not answered. */
+  showQuizHint(topicId: string, messageId: string, question: number) {
+    const at = this.quizAt(topicId, messageId)
+    const q = at?.quiz.questions[question]
+    if (!at || !q || isAnswered(at.quiz, question)) return
+    const quiz = at.quiz
+    if (!quiz.hints_used) quiz.hints_used = quiz.questions.map(() => 0)
+    if ((quiz.hints_used[question] ?? 0) < (q.hints?.length ?? 0)) quiz.hints_used[question] = (quiz.hints_used[question] ?? 0) + 1
+  }
+
   /**
    * Once every question is answered, Haiku grades the typed answers and writes a note on what
    * to review, in one call; nothing to do when there is nothing to grade and every choice was right.
@@ -1213,8 +1223,16 @@ function restoredMessage(message: ChatMessage): ChatMessage {
 }
 
 /** A quiz as the backend reads it. */
-function quizRecord({ title, questions, picked, typed, grades, recommendation }: Quiz): QuizRecord {
-  return { title, questions, picked, ...(typed && { typed }), ...(grades && { grades }), ...(recommendation && { recommendation }) }
+function quizRecord({ title, questions, picked, typed, grades, hints_used, recommendation }: Quiz): QuizRecord {
+  return {
+    title,
+    questions,
+    picked,
+    ...(typed && { typed }),
+    ...(grades && { grades }),
+    ...(hints_used && { hints_used }),
+    ...(recommendation && { recommendation }),
+  }
 }
 
 /**

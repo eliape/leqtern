@@ -20,6 +20,9 @@ RECOMMEND_MODEL = "claude-haiku-5-5"
 
 LETTERS = "ABCDEFGH"
 
+# Hints a quiz question can have: one, or two for a hard one.
+MAX_HINTS = 2
+
 # By default at most this share of a quiz's questions are typed answers, so they don't take
 # over; the reader can change it in Settings.
 MAX_TYPED_SHARE = 0.4
@@ -76,6 +79,13 @@ class WrittenQuestion(BaseModel):
         description="Why the right answer is right, in a sentence or two. Cite a page only to "
         "point at something to look at, not as a source. " + MATHS
     )
+    hints: list[str] = Field(
+        default=[],
+        description="Hints they can ask for while answering: one, or two for a hard question, "
+        "the first a gentle nudge (which idea or step to think about), the second more "
+        "concrete. Never give away the answer, and never point at or rule out an option. "
+        "One short sentence each. " + MATHS,
+    )
 
 
 class WrittenQuiz(BaseModel):
@@ -101,6 +111,7 @@ class QuizQuestion(BaseModel):
     misconceptions: list[str | None] = Field(
         default=[], description="For each choice, the mistake behind it; None for the right one"
     )
+    hints: list[str] = Field(default=[], description="Hints they can ask for, gentlest first")
     model_answer: str | None = Field(default=None, description="Typed questions: the answer")
     key_points: list[str] = Field(default=[], description="Typed questions: what must be right")
 
@@ -135,7 +146,13 @@ class QuizRecord(Quiz):
         description="For each question, how what they typed was graded. Only typed questions "
         "are graded for now; guesses could be, later, for bonus points.",
     )
+    hints_used: list[int] = Field(
+        default=[], description="For each question, how many of its hints they looked at"
+    )
     recommendation: str | None = None
+
+    def hints_seen(self, n: int) -> int:
+        return self.hints_used[n] if n < len(self.hints_used) else 0
 
     def typed_answer(self, n: int) -> str | None:
         text = self.typed[n] if n < len(self.typed) else None
@@ -171,6 +188,7 @@ def arrange(
     rng = rng or random.Random()
     questions = []
     for q in capped(written.questions, typed_share):
+        hints = [h for h in q.hints if h.strip()][:MAX_HINTS]
         if q.kind == "typed":
             if not q.answer.strip():
                 continue
@@ -180,6 +198,7 @@ def arrange(
                     question=q.question,
                     explanation=q.explanation,
                     model_answer=q.answer,
+                    hints=hints,
                     key_points=[p for p in q.key_points if p.strip()],
                 )
             )
@@ -198,6 +217,7 @@ def arrange(
                 answer=next(i for i, (_, _, right) in enumerate(options) if right),
                 explanation=q.explanation,
                 misconceptions=[why for _, why, _ in options],
+                hints=hints,
             )
         )
     return Quiz(title=written.title, questions=questions)
@@ -321,6 +341,9 @@ def results_text(quiz: QuizRecord) -> str | None:
                 + f"; the answer is {LETTERS[q.answer]}) {q.choices[q.answer]}."
                 + guessed
             )
+        seen = quiz.hints_seen(n)
+        if seen:
+            line += f" (after {seen} hint{'s' if seen > 1 else ''})"
         lines.append(f"{n + 1}. {line}")
     if quiz.recommendation:
         lines.append(f"They were advised: {quiz.recommendation}")

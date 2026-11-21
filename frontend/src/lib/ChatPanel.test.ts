@@ -340,7 +340,13 @@ describe('ChatPanel', () => {
         quiz: {
           title: 'Powers',
           questions: [
-            { question: 'Derivative of x squared?', choices: ['x', '2x'], answer: 1, explanation: 'The power rule.' },
+            {
+              question: 'Derivative of x squared?',
+              choices: ['x', '2x'],
+              answer: 1,
+              explanation: 'The power rule.',
+              hints: ['Think of the power rule.', 'Bring the 2 down.'],
+            },
             { kind: 'typed' as const, question: 'Derivative of x cubed?', choices: [], answer: -1, explanation: 'Again.', model_answer: '3x^2' },
           ],
         },
@@ -348,6 +354,19 @@ describe('ChatPanel', () => {
     })
     await tick()
     const quiz = within(panel.getByRole('group', { name: 'Quiz: Powers' }))
+    // The lightbulb reveals the hints one at a time above the still-covered choices, the newest
+    // on top of a deck; once there are two, clicking the deck cycles through them.
+    await fireEvent.click(quiz.getByRole('button', { name: 'Show a hint' }))
+    expect(quiz.getByRole('note', { name: 'Hint' })).toHaveTextContent('Think of the power rule.')
+    await fireEvent.click(quiz.getByRole('button', { name: 'Show another hint' }))
+    const deck = () => quiz.getByRole('button', { name: /^Hint \d of 2/ })
+    expect(deck()).toHaveTextContent('Hint 2 of 2 Bring the 2 down.')
+    expect(quiz.getByRole('button', { name: 'No more hints' })).toBeDisabled()
+    await fireEvent.click(deck())
+    expect(deck()).toHaveTextContent('Hint 1 of 2 Think of the power rule.')
+    await fireEvent.click(deck())
+    expect(deck()).toHaveTextContent('Bring the 2 down.')
+    expect(quiz.getByRole('button', { name: 'Click to reveal' })).toBeInTheDocument()
     const guess = quiz.getByLabelText('Your guess')
     await fireEvent.input(guess, { target: { value: '2x' } })
     // Clicking in the box does not uncover the choices; Enter does, keeping the guess.
@@ -357,8 +376,11 @@ describe('ChatPanel', () => {
     expect(quiz.queryByLabelText('Your guess')).not.toBeInTheDocument()
     await fireEvent.click(quiz.getByRole('button', { name: '2x' }))
     expect(quiz.getByRole('status')).toHaveTextContent('Your guess 2x')
+    expect(deck()).toBeInTheDocument()
+    // The typed question has no hints, so no lightbulb.
     await fireEvent.click(quiz.getByRole('button', { name: 'Next question' }))
 
+    expect(quiz.queryByRole('button', { name: /hint/ })).not.toBeInTheDocument()
     const answer = quiz.getByLabelText('Your answer')
     expect(quiz.getByRole('button', { name: 'Submit' })).toBeDisabled()
     await fireEvent.input(answer, { target: { value: 'x^2' } })
@@ -373,6 +395,7 @@ describe('ChatPanel', () => {
     await vi.waitFor(() => expect(quiz.getByText('Go over the power rule.')).toBeInTheDocument())
     await fireEvent.click(quiz.getByRole('button', { name: 'Details' }))
     expect(quiz.getByText('Not right. The power drops by one.')).toBeInTheDocument()
+    expect(quiz.getByText('Used 2 hints')).toBeInTheDocument()
   })
 
   it('switches the mode from the menu on the left below the question box', async () => {

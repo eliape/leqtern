@@ -10,6 +10,8 @@ export type QuizQuestion = {
   explanation: string
   /** For each choice, the mistake that leads to it; null for the right one. Older quizzes have none. */
   misconceptions?: (string | null)[]
+  /** Hints the reader can ask for while answering, gentlest first (at most two). */
+  hints?: string[]
   /** Typed questions: the answer, and what an answer must get right to count. */
   model_answer?: string | null
   key_points?: string[]
@@ -31,6 +33,8 @@ export type QuizRecord = WrittenQuiz & {
   picked: (number | null)[]
   typed?: (string | null)[]
   grades?: (Grade | null)[]
+  /** For each question, how many of its hints the reader looked at. */
+  hints_used?: number[]
   recommendation?: string
 }
 

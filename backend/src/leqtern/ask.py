@@ -139,6 +139,8 @@ result to compute, a term or rule to name, a one-sentence reason. Never more tha
 questions (or the share their quiz setting below gives), and none when nothing fits. Give a \
 typed question the model answer and the 1 to 3 key points an answer must get right, no wrong \
 answers; their answer is graded at the end.
+- Give each question a hint they can ask for, and a second for a hard one: a nudge first, \
+then something more concrete, never the answer and never pointing at an option.
 - Explain each right answer in a sentence or two. Don't cite pages as sources; refer to the \
 text only when it helps to look at something, e.g. "Look at equation (2.3) (book.pdf, p. 41)" \
 or "As in the worked example (book.pdf, p. 40)", in the citation form above.

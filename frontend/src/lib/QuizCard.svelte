@@ -11,13 +11,15 @@
     onpick: (question: number, choice: number) => void
     /** The reader typed an answer to a typed question, or a guess before uncovering the choices. */
     ontype?: (question: number, text: string) => void
+    /** The reader asked for the next hint on a question. */
+    onhint?: (question: number) => void
     /** The question on show changed (the number of questions for the results). */
     onopen?: (question: number) => void
     /** What the quiz's citations can point at, as in answers. */
     docs?: CitableDocs
   }
 
-  let { quiz, onpick, ontype, onopen, docs }: Props = $props()
+  let { quiz, onpick, ontype, onhint, onopen, docs }: Props = $props()
 
   const LETTERS = 'ABCDEFGH'
   const total = $derived(quiz.questions.length)
@@ -56,6 +58,18 @@
       event.preventDefault()
       send()
     }
+  }
+
+  let hints = $derived(question?.hints ?? [])
+  let hintsSeen = $derived(Math.min(quiz.hints_used?.[step] ?? 0, hints.length))
+  // Which revealed hint is on top of the deck: the newest, until the reader clicks to cycle.
+  // Reset per question and whenever another hint is revealed.
+  let hintAt = $state<{ step: number; seen: number; at: number } | null>(null)
+  let shownHint = $derived(hintAt?.step === step && hintAt.seen === hintsSeen ? hintAt.at : hintsSeen - 1)
+
+  /** Put the next revealed hint on top. */
+  function cycleHint() {
+    if (hintsSeen > 1) hintAt = { step, seen: hintsSeen, at: (shownHint + 1) % hintsSeen }
   }
 
   const VERDICTS = { right: 'Right', partly: 'Partly right', wrong: 'Not right' } as const
@@ -106,11 +120,47 @@
 <div class="quiz" role="group" aria-label={`Quiz: ${quiz.title}`}>
   <div class="head">
     <span class="title">{quiz.title}</span>
-    <span class="progress">{step < total ? `Question ${step + 1} of ${total}` : 'Results'}</span>
+    <span class="head-end">
+      {#if question && hints.length && onhint}
+        <button
+          type="button"
+          class="hint-button"
+          title={hintsSeen >= hints.length ? 'No more hints' : hintsSeen ? 'Show another hint' : 'Show a hint'}
+          aria-label={hintsSeen >= hints.length ? 'No more hints' : hintsSeen ? 'Show another hint' : 'Show a hint'}
+          disabled={answered || hintsSeen >= hints.length}
+          onclick={() => onhint(step)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"
+            ><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2V16h5.2v-.2c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z" /></svg
+          >
+        </button>
+      {/if}
+      <span class="progress">{step < total ? `Question ${step + 1} of ${total}` : 'Results'}</span>
+    </span>
   </div>
 
   {#if question}
     <div class="question markdown">{@html renderMarkdown(question.question, docs)}</div>
+    {#if hintsSeen}
+      <!-- The revealed hints as a deck: the top card shows, the others peek out below it. -->
+      <div class="hints" style={`--behind: ${hintsSeen - 1}`} aria-live="polite">
+        {#if hintsSeen > 1}
+          <button
+            type="button"
+            class="hint card"
+            aria-label={`Hint ${shownHint + 1} of ${hintsSeen}, click for the next`}
+            onclick={cycleHint}
+          >
+            <span class="hint-number">Hint {shownHint + 1} of {hintsSeen}</span>
+            <span class="markdown">{@html inline(hints[shownHint])}</span>
+          </button>
+        {:else}
+          <div class="hint card" role="note" aria-label="Hint">
+            <span class="markdown">{@html inline(hints[0])}</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
     {#if typed}
       {#if !answered}
         <div class="typed">
@@ -226,6 +276,9 @@
               >
               {@html renderMarkdown(q.question, docs)}
             </div>
+            {#if quiz.hints_used?.[i]}
+              <p class="muted-note">Used {quiz.hints_used[i] === 1 ? 'a hint' : `${quiz.hints_used[i]} hints`}</p>
+            {/if}
             {#if isTyped(quiz, i)}
               <p class="wrote"><span class="label">You wrote</span> {typedText(quiz, i) ?? '–'}</p>
               {#if grade}
@@ -268,6 +321,87 @@
   }
   .title {
     font-weight: 600;
+  }
+  .head-end {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+  }
+  .hint-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.1rem 0.3rem;
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .hint-button:hover:not(:disabled) {
+    background: var(--hover);
+    color: inherit;
+  }
+  .hint-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .hint-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .hint-button svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .hints {
+    /* Room for the cards behind the top one. */
+    margin-bottom: calc(var(--behind) * 0.35rem);
+  }
+  .hint {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid color-mix(in srgb, var(--quiz) 35%, var(--border));
+    border-left: 3px solid var(--quiz);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--quiz) 8%, var(--surface));
+    color: inherit;
+    font: inherit;
+    font-size: 0.9em;
+    text-align: left;
+    /* The cards behind, as edges peeking out below. */
+    box-shadow:
+      0 calc(min(var(--behind), 1) * 0.4rem) 0 calc(min(var(--behind), 1) * -0.3rem)
+        color-mix(in srgb, var(--quiz) 16%, var(--surface)),
+      0 calc(min(var(--behind), 1) * 0.4rem) 0 calc(min(var(--behind), 1) * -0.24rem)
+        color-mix(in srgb, var(--quiz) 40%, var(--border));
+  }
+  button.hint {
+    cursor: pointer;
+  }
+  button.hint:hover {
+    background: color-mix(in srgb, var(--quiz) 13%, var(--surface));
+  }
+  button.hint:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .hint-number {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--quiz);
   }
   .progress {
     flex-shrink: 0;

@@ -431,6 +431,7 @@ def test_typed_answers_are_graded_with_the_note_in_one_haiku_call(client: TestCl
         questions=[*quiz().questions, typed_question()],
         picked=[1, 0, None],
         typed=["2x", None, "x^2"],
+        hints_used=[0, 1],
     )
     response = client.post(
         "/api/quiz/recommendation",
@@ -445,8 +446,9 @@ def test_typed_answers_are_graded_with_the_note_in_one_haiku_call(client: TestCl
     assert "3. (typed answer) What is d/dx of x^3?" in prompt
     assert "Model answer: $3x^2$" in prompt and "the factor 3; the power 2" in prompt
     assert "3. They wrote: x^2 (not graded)." in prompt
-    # A guess typed before seeing the options goes along too.
+    # A guess typed before seeing the options goes along too, and so do hints used.
     assert "1. Right. Before seeing the options they guessed: 2x." in prompt
+    assert "2. Right. (after 1 hint)" in prompt
 
 
 def test_a_graded_typed_answer_reads_in_the_history() -> None:
@@ -487,6 +489,9 @@ def test_typed_questions_are_capped_at_two_in_five() -> None:
     ]
     # A quiz of only typed questions keeps none of them... unless one can be multiple choice.
     assert arrange(WrittenQuiz(title="T", questions=typed)).questions == []
+    # Hints go along, at most two, without empty ones.
+    hinted = written_question("H?", "r", "a").model_copy(update={"hints": ["one", " ", "two", "3"]})
+    assert arrange(WrittenQuiz(title="T", questions=[hinted])).questions[0].hints == ["one", "two"]
     # The reader's setting moves the cap: none, or all of them.
     mixed = WrittenQuiz(title="T", questions=[*choice, *typed])
     assert [q.kind for q in arrange(mixed, typed_share=0).questions].count("typed") == 0
