@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AskRequest, DiscussionRequest, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
+import { setTypedQuizShare } from './quizMask.svelte'
+import type { AskRequest, DiscussionRequest, Grade, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
 import type { PageContext } from './context'
 import {
   type QuizApi,
@@ -688,12 +689,12 @@ describe('Workspace.ask', () => {
   })
 
 
-  function fakeQuizApi(recommendation: string | null = 'Read p. 12 again.') {
+  function fakeQuizApi(recommendation: string | null = 'Read p. 12 again.', grades: (Grade | null)[] = []) {
     const recommended: RecommendationRequest[] = []
     const api: QuizApi = {
       recommend: async (request) => {
         recommended.push(request)
-        return recommendation
+        return { text: recommendation, grades }
       },
     }
     return { api, recommended }
@@ -770,6 +771,56 @@ describe('Workspace.ask', () => {
     await ws.answerQuiz(topic.id, perfect.id, 1, 0, api)
     expect(recommended).toHaveLength(1)
     expect(perfect.quiz!.recommendation).toBeUndefined()
+  })
+
+  it('keeps a guess and a typed answer, and grades typed answers with the note at the end', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const grade: Grade = { verdict: 'partly', feedback: 'Missed the factor 3.' }
+    const { api, recommended } = fakeQuizApi('Go over the power rule.', [null, grade])
+    const typed = { kind: 'typed' as const, question: 'd/dx of $x^3$?', choices: [], answer: -1, explanation: 'Power rule.', model_answer: '$3x^2$' }
+    topic.draft = 'Quiz me'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'quiz' as const, quiz: { title: 'D', questions: [written.questions[0], typed] } }
+    })
+    const message = chatOf(topic).messages[1]
+
+    // A guess before the choices is kept once, and does not answer the question.
+    await ws.typeQuiz(topic.id, message.id, 0, ' 2x ', api)
+    await ws.typeQuiz(topic.id, message.id, 0, 'x', api)
+    expect(message.quiz!.typed).toEqual(['2x', null])
+    await ws.answerQuiz(topic.id, message.id, 0, 1, api)
+    // A typed question takes no pick, and an empty answer does not count.
+    await ws.answerQuiz(topic.id, message.id, 1, 0, api)
+    await ws.typeQuiz(topic.id, message.id, 1, '  ', api)
+    expect(recommended).toEqual([])
+
+    // All right on the choices, but a typed answer still gets graded.
+    await ws.typeQuiz(topic.id, message.id, 1, 'x^2', api)
+    expect(recommended).toHaveLength(1)
+    expect(recommended[0].quiz).toMatchObject({ picked: [1, null], typed: ['2x', 'x^2'] })
+    expect(message.quiz).toMatchObject({ grades: [null, grade], recommendation: 'Go over the power rule.', reviewing: undefined })
+    await ws.typeQuiz(topic.id, message.id, 1, 'changed', api)
+    expect(message.quiz!.typed![1]).toBe('x^2')
+  })
+
+  it('sends the typed-question share only when it is not the default', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const requests: AskRequest[] = []
+    const stream = async function* (request: AskRequest) {
+      requests.push(request)
+      yield { type: 'text' as const, text: 'ok' }
+    }
+    topic.draft = 'one'
+    await ws.ask(topic.id, undefined, stream)
+    setTypedQuizShare(0.2)
+    topic.draft = 'two'
+    await ws.ask(topic.id, undefined, stream)
+    setTypedQuizShare(0.4)
+    expect(requests.map((r) => r.typed_share)).toEqual([undefined, 0.2])
   })
 
   it('says so when the note on what to review could not be written', async () => {
@@ -1560,7 +1611,7 @@ describe('Workspace register', () => {
     const { ws, forgotten } = workspace()
     ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    ws.quizApi = { recommend: async () => 'Review the power rule.' }
+    ws.quizApi = { recommend: async () => ({ text: 'Review the power rule.', grades: [] }) }
     topic.draft = 'Quiz me'
     await ws.ask(topic.id, undefined, async function* () {
       yield { type: 'quiz' as const, quiz: structuredClone(written) }

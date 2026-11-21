@@ -23,7 +23,7 @@ from .flashcards import FlashcardRequest, make_flashcards, sync_vectors
 from .flashcards import Services as FlashcardServices
 from .index import Indexer
 from .library import Library
-from .quiz import QuizRecord, recommend
+from .quiz import QuizRecord, review
 from .register import (
     TIDY_AFTER,
     DiscussionRequest,
@@ -334,18 +334,22 @@ async def quiz_recommendation(
     request: RecommendRequest,
     client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
     services: ServicesDep,
-) -> dict[str, str | None]:
-    """What to review after a quiz, or no text when every answer was right."""
+) -> dict[str, Any]:
+    """
+    After a quiz: grades for its typed answers (by question, null for the rest) and what to
+    review, or no text when every answer was right.
+    """
     about = request.about
     asked = describe(about.context) if about.context else ""
     if about.text.strip():
         asked += f" They asked: {about.text.strip()}"
     try:
-        text = await recommend(client, request.topic, asked, request.quiz, services.usage)
+        result = await review(client, request.topic, asked, request.quiz, services.usage)
     except Exception as error:
         logger.exception("Recommendation failed")
         raise HTTPException(status_code=502, detail=error_message(error)) from error
-    return {"text": text}
+    grades = [g.model_dump() if g else None for g in result.grades]
+    return {"text": result.recommendation, "grades": grades}
 
 
 class TitleRequest(BaseModel):

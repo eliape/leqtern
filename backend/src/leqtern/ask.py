@@ -18,7 +18,16 @@ from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
 
 from .hints import HINTS_TOOL, Hints, HintsInput, OpenCard, answer_text, open_text
-from .quiz import QUIZ_TOOL, Quiz, QuizRecord, WrittenQuiz, arrange, quiz_text, results_text
+from .quiz import (
+    MAX_TYPED_SHARE,
+    QUIZ_TOOL,
+    Quiz,
+    QuizRecord,
+    WrittenQuiz,
+    arrange,
+    quiz_text,
+    results_text,
+)
 from .tools import TOOLS, Toolbox, ToolError, TopicDoc, catalogue, overview
 from .usage import UsageLog, call_from_response
 
@@ -102,10 +111,9 @@ Turns without [Socratic] are ordinary questions: answer them as usual. The first
 session starts with [Socratic session ended], because they switched back to normal answers: \
 stop asking them questions and answer directly.
 
-Quizzes: when they ask to be quizzed or tested, write a multiple-choice quiz with make_quiz \
-rather than questions in your answer, except in a Socratic session. They click through it in \
-the chat, and how they did comes back in a turn starting with [Quiz results]. When you write a \
-quiz:
+Quizzes: when they ask to be quizzed or tested, write a quiz with make_quiz rather than \
+questions in your answer, except in a Socratic session. They work through it in the chat, and \
+how they did comes back in a turn starting with [Quiz results]. When you write a quiz:
 - Ask 4 to 6 questions about what they pointed at or asked about, unless they ask for another \
 number. With nothing pointed at or named, quiz them on the section they are reading, up to \
 where they are and nothing after it.
@@ -125,6 +133,14 @@ the above".
 - Test application and analysis, not recall: no "what is the definition of". Mix questions \
 that set a short concrete scenario or problem and ask which idea or result applies, with \
 questions that show a flawed application or argument and ask exactly what goes wrong.
+- Most questions are multiple choice. Make a question typed (kind "typed") only where \
+producing the answer is the point and it can be checked against a short model answer: a \
+result to compute, a term or rule to name, a one-sentence reason. Never more than 2 in 5 \
+questions (or the share their quiz setting below gives), and none when nothing fits. Give a \
+typed question the model answer and the 1 to 3 key points an answer must get right, no wrong \
+answers; their answer is graded at the end.
+- Give each question a hint they can ask for, and a second for a hard one: a nudge first, \
+then something more concrete, never the answer and never pointing at an option.
 - Explain each right answer in a sentence or two. Don't cite pages as sources; refer to the \
 text only when it helps to look at something, e.g. "Look at equation (2.3) (book.pdf, p. 41)" \
 or "As in the worked example (book.pdf, p. 40)", in the citation form above.
@@ -228,6 +244,12 @@ class AskRequest(BaseModel):
     instructions: str = Field(default="", description="The reader's instructions, from Settings")
     scope: str = Field(default="", description="The topic's syllabus or scope, and its purpose")
     conventions: str = Field(default="", description="Conventions answers in the topic follow")
+    typed_share: float = Field(
+        default=MAX_TYPED_SHARE,
+        ge=0,
+        le=1,
+        description="The most of a quiz's questions that may be typed answers, from Settings",
+    )
 
 
 def page_name(page: int, label: str | None) -> str:
@@ -382,6 +404,7 @@ def system_blocks(
     conventions: str = "",
     documents: str = "",
     cache: dict[str, str] = LONG_CACHE,
+    typed_share: float = MAX_TYPED_SHARE,
 ) -> list[dict[str, Any]]:
     """
     Fixed instructions, the reader's own (set once in Settings, so they rarely change and
@@ -397,6 +420,8 @@ def system_blocks(
         about.append(TOPIC_CONVENTIONS.format(conventions.strip()))
     if documents:
         about.append(documents)
+    if typed_share != MAX_TYPED_SHARE:
+        about.append(typed_setting(typed_share))
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
         *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
@@ -408,7 +433,23 @@ def request_system(
     request: AskRequest, documents: str = "", cache: dict[str, str] = LONG_CACHE
 ) -> list[dict[str, Any]]:
     return system_blocks(
-        request.topic, request.instructions, request.scope, request.conventions, documents, cache
+        request.topic,
+        request.instructions,
+        request.scope,
+        request.conventions,
+        documents,
+        cache,
+        request.typed_share,
+    )
+
+
+def typed_setting(share: float) -> str:
+    """Their quiz setting for typed questions, when it is not the default."""
+    if share <= 0:
+        return "Their quiz setting: no typed questions, only multiple choice."
+    return (
+        f"Their quiz setting: at most {round(share * 100)}% of a quiz's questions typed "
+        "(still only where they fit)."
     )
 
 
@@ -523,10 +564,10 @@ def record_stopped(
     usage.record(call_from_response("answer", model, snapshot, seconds, stopped=True, **details))
 
 
-def written_quiz(raw: Any) -> Quiz | None:
+def written_quiz(raw: Any, typed_share: float = MAX_TYPED_SHARE) -> Quiz | None:
     """The quiz a make_quiz call wrote, arranged for the reader, or None if it is unusable."""
     try:
-        quiz = arrange(WrittenQuiz.model_validate(raw))
+        quiz = arrange(WrittenQuiz.model_validate(raw), typed_share=typed_share)
     except ValidationError:
         return None
     return quiz if quiz.questions else None
@@ -660,7 +701,7 @@ async def stream_answer(
         lookups = [b for b in tool_uses if b.name not in shown]
         for block in tool_uses:
             if block.name == QUIZ_TOOL["name"]:
-                quiz = None if socratic else written_quiz(block.input)
+                quiz = None if socratic else written_quiz(block.input, request.typed_share)
                 if quiz is None:
                     why = "Not in a Socratic session." if socratic else "No usable questions."
                     results.append(tool_error(block.id, why))

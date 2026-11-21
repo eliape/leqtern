@@ -24,9 +24,10 @@ from leqtern.ask import (
 from leqtern.config import Settings, get_settings
 from leqtern.quiz import (
     Distractor,
+    Grade,
     QuizQuestion,
     QuizRecord,
-    Recommendation,
+    Review,
     WrittenQuestion,
     WrittenQuiz,
     arrange,
@@ -384,14 +385,14 @@ def test_quiz_writing_rules_are_in_the_prompt() -> None:
 def test_quiz_recommendation_comes_from_haiku_only_when_something_was_wrong(
     client: TestClient,
 ) -> None:
-    fake = FakeIndexClient(lambda _kwargs: Recommendation(text=" Read p. 12 again. "))
+    fake = FakeIndexClient(lambda _kwargs: Review(recommendation=" Read p. 12 again. "))
     main.app.dependency_overrides[main.get_client] = lambda: fake
     about = {"role": "user", "text": "the power rule", "context": {"doc_name": "a.pdf", "page": 3}}
     wrong = quiz(picked=[0, 0]).model_dump()
     response = client.post(
         "/api/quiz/recommendation", json={"topic": "T", "about": about, "quiz": wrong}
     )
-    assert response.json() == {"text": "Read p. 12 again."}
+    assert response.json() == {"text": "Read p. 12 again.", "grades": [None, None]}
     sent = fake.requests[0]
     assert sent["model"] == "claude-haiku-5-5"
     prompt = sent["messages"][0]["content"]
@@ -404,8 +405,106 @@ def test_quiz_recommendation_comes_from_haiku_only_when_something_was_wrong(
     response = client.post(
         "/api/quiz/recommendation", json={"topic": "T", "about": about, "quiz": right}
     )
-    assert response.json() == {"text": None}
+    assert response.json() == {"text": None, "grades": []}
     assert len(fake.requests) == 1
+
+
+def typed_question(question: str = "What is d/dx of x^3?") -> QuizQuestion:
+    return QuizQuestion(
+        kind="typed",
+        question=question,
+        explanation="The power rule.",
+        model_answer="$3x^2$",
+        key_points=["the factor 3", "the power 2"],
+    )
+
+
+def test_typed_answers_are_graded_with_the_note_in_one_haiku_call(client: TestClient) -> None:
+    fake = FakeIndexClient(
+        lambda _kwargs: Review(
+            grades=[Grade(verdict="partly", feedback="Missed the factor 3.")],
+            recommendation="Go over the power rule.",
+        )
+    )
+    main.app.dependency_overrides[main.get_client] = lambda: fake
+    record = quiz(
+        questions=[*quiz().questions, typed_question()],
+        picked=[1, 0, None],
+        typed=["2x", None, "x^2"],
+        hints_used=[0, 1],
+    )
+    response = client.post(
+        "/api/quiz/recommendation",
+        json={"topic": "T", "about": {"role": "user", "text": ""}, "quiz": record.model_dump()},
+    )
+    assert response.json() == {
+        "text": "Go over the power rule.",
+        "grades": [None, None, {"verdict": "partly", "feedback": "Missed the factor 3."}],
+    }
+    prompt = fake.requests[0]["messages"][0]["content"]
+    assert "grade their typed answers, in this order: 3." in prompt
+    assert "3. (typed answer) What is d/dx of x^3?" in prompt
+    assert "Model answer: $3x^2$" in prompt and "the factor 3; the power 2" in prompt
+    assert "3. They wrote: x^2 (not graded)." in prompt
+    # A guess typed before seeing the options goes along too, and so do hints used.
+    assert "1. Right. Before seeing the options they guessed: 2x." in prompt
+    assert "2. Right. (after 1 hint)" in prompt
+
+
+def test_a_graded_typed_answer_reads_in_the_history() -> None:
+    record = quiz(
+        questions=[typed_question()],
+        typed=["3x^2"],
+        grades=[Grade(verdict="right", feedback="")],
+    )
+    from leqtern.quiz import results_text
+
+    expected = "[Quiz results] They got 1 of 1 right.\n1. Right: they wrote 3x^2."
+    assert results_text(record) == expected
+
+
+def written_typed(question: str, *wrong: str) -> WrittenQuestion:
+    return written_question(question, "42", *wrong).model_copy(
+        update={"kind": "typed", "key_points": ["the number"]}
+    )
+
+
+def test_typed_questions_are_capped_at_two_in_five() -> None:
+    choice = [written_question(f"C{n}?", "r", "a", "b", "c") for n in range(3)]
+    typed = [written_typed(f"T{n}?") for n in range(3)]
+    # 3 choice + 3 typed: the last typed one goes (2 of 5), as it has no wrong answers.
+    arranged = arrange(WrittenQuiz(title="T", questions=[*choice, *typed])).questions
+    assert [q.question for q in arranged] == ["C0?", "C1?", "C2?", "T0?", "T1?"]
+    assert [q.kind for q in arranged].count("typed") == 2
+    t = arranged[3]
+    assert (t.choices, t.model_answer, t.key_points) == ([], "42", ["the number"])
+    # One with wrong answers becomes multiple choice instead of going.
+    spare = written_typed("T9?", "a", "b", "c")
+    arranged = arrange(WrittenQuiz(title="T", questions=[*choice[:2], typed[0], spare])).questions
+    assert [(q.question, q.kind) for q in arranged] == [
+        ("C0?", "choice"),
+        ("C1?", "choice"),
+        ("T0?", "typed"),
+        ("T9?", "choice"),
+    ]
+    # A quiz of only typed questions keeps none of them... unless one can be multiple choice.
+    assert arrange(WrittenQuiz(title="T", questions=typed)).questions == []
+    # Hints go along, at most two, without empty ones.
+    hinted = written_question("H?", "r", "a").model_copy(update={"hints": ["one", " ", "two", "3"]})
+    assert arrange(WrittenQuiz(title="T", questions=[hinted])).questions[0].hints == ["one", "two"]
+    # The reader's setting moves the cap: none, or all of them.
+    mixed = WrittenQuiz(title="T", questions=[*choice, *typed])
+    assert [q.kind for q in arrange(mixed, typed_share=0).questions].count("typed") == 0
+    assert [q.kind for q in arrange(mixed, typed_share=1).questions].count("typed") == 3
+
+
+def test_a_typed_share_other_than_the_default_goes_in_the_system_prompt() -> None:
+    def topic_block(share: float) -> str:
+        return request_system(AskRequest(topic="T", messages=[], typed_share=share))[-1]["text"]
+
+    assert "quiz setting" not in topic_block(0.4)
+    assert "at most 60% of a quiz's questions typed" in topic_block(0.6)
+    assert "no typed questions" in topic_block(0)
 
 
 def test_without_an_attachment_the_page_is_named_not_shown() -> None:

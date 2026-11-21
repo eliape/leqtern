@@ -449,6 +449,8 @@
                 quiz={message.quiz}
                 docs={citable(index)}
                 onpick={(question, choice) => workspace.answerQuiz(topic.id, message.id, question, choice)}
+                ontype={(question, text) => workspace.typeQuiz(topic.id, message.id, question, text)}
+                onhint={(question) => workspace.showQuizHint(topic.id, message.id, question)}
                 onopen={(question) => (message.openCard = question)}
               />
             {/if}
