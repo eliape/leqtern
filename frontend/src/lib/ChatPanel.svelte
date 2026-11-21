@@ -12,7 +12,8 @@
   import QuizCard from './QuizCard.svelte'
   import HintDeck from './HintDeck.svelte'
   import { streamFade } from './streamFade'
-  import { type Chat, chatOf, chatTitle, type Topic, type Workspace } from './workspace.svelte'
+  import { ongoing, stepLabel } from './steps'
+  import { type Chat, type ChatMessage, chatOf, chatTitle, type Topic, type Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
@@ -130,6 +131,12 @@
    */
   function pointedAt(context: PageContext) {
     return !!(context.point || context.selection)
+  }
+
+  /** Whether an answer's newest step is still running ("Writing a quiz…"), which then says it is busy. */
+  function stepRunning(message: ChatMessage) {
+    const last = message.steps?.at(-1)
+    return message.status === 'streaming' && last !== undefined && ongoing(last)
   }
 
   /** The chip's name, with the PDF's name when the topic has several. */
@@ -415,10 +422,13 @@
             {/if}
             {#if message.steps?.length}
               <ul class="steps" aria-label="Looked up">
-                {#each message.steps as step, i (i)}<li>{step}</li>{/each}
+                {#each message.steps as step, i (i)}
+                  {@const running = message.status === 'streaming' && i === message.steps.length - 1}
+                  <li><span class:thinking={running && ongoing(step)}>{stepLabel(step, running)}</span></li>
+                {/each}
               </ul>
             {/if}
-            {#if message.status === 'streaming' && !message.text && !message.thinking}
+            {#if message.status === 'streaming' && !message.text && !message.thinking && !stepRunning(message)}
               <span class="thinking">{message.mode === 'quiz' ? 'Writing a quiz…' : 'Thinking…'}</span>
             {:else if message.status === 'streaming' && !message.text}
               <!-- Still thinking: the row above says so. -->

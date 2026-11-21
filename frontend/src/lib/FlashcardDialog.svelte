@@ -21,6 +21,7 @@
     typeName,
   } from './flashcards'
   import { EFFORTS, MODELS } from './models'
+  import { stepLabel } from './steps'
   import type { FlashcardSource, Workspace } from './workspace.svelte'
 
   type Props = {
@@ -244,7 +245,7 @@
       <div class="writing" aria-live="polite">
         <p class="busy">Writing {plural(clampCount(options.count), 'card')}…</p>
         {#if steps.length}
-          <ul class="steps">{#each steps as text, i (i)}<li>{text}</li>{/each}</ul>
+          <ul class="steps">{#each steps as text, i (i)}<li>{stepLabel(text, i === steps.length - 1)}</li>{/each}</ul>
         {/if}
       </div>
       <footer>
