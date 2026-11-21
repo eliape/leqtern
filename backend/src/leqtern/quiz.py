@@ -18,17 +18,20 @@ RECOMMEND_MODEL = "claude-haiku-5-5"
 
 LETTERS = "ABCDEFGH"
 
+# The card typesets $...$ with KaTeX; Unicode stand-ins like "d²x/dτ²" show as plain text.
+MATHS = "Markdown; all maths in LaTeX like $x^\\mu$, never Unicode like x² or x_μ"
+
 
 class Distractor(BaseModel):
     misconception_rationale: str = Field(
         description="Written first: the specific mistake or misconception that leads to this "
         "answer, in one sentence the reader is shown after answering, e.g. 'Uses the diameter "
         "where the formula needs the radius.' or 'Confuses negative reinforcement with "
-        "punishment.'"
+        "punishment.' " + MATHS
     )
     text: str = Field(
         description="The wrong answer that mistake produces, parallel in form, length and "
-        "vocabulary to the right answer. Markdown, with maths in LaTeX"
+        "vocabulary to the right answer. " + MATHS
     )
 
 
@@ -42,18 +45,20 @@ class WrittenQuestion(BaseModel):
     )
     question: str = Field(
         description="The stem: a complete, self-contained question that can be answered before "
-        "reading the options. Markdown, with maths in LaTeX"
+        "reading the options. " + MATHS
     )
-    answer: str = Field(description="The right answer, written like the wrong ones")
+    answer: str = Field(description="The right answer, written like the wrong ones. " + MATHS)
     distractors: list[Distractor] = Field(description="Exactly 3 wrong answers")
     explanation: str = Field(
         description="Why the right answer is right, in a sentence or two. Cite a page only to "
-        "point at something to look at, not as a source"
+        "point at something to look at, not as a source. " + MATHS
     )
 
 
 class WrittenQuiz(BaseModel):
-    title: str = Field(description="A few words naming what the quiz is about")
+    title: str = Field(
+        description="A few words naming what the quiz is about, in plain text without maths"
+    )
     questions: list[WrittenQuestion]
 
 
