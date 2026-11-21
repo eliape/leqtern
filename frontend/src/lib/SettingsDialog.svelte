@@ -1,5 +1,6 @@
 <script lang="ts">
   import { saveZoomFollowsChat } from './chatZoom'
+  import { quizMask, setHideQuizChoices } from './quizMask.svelte'
   import { applyTheme, savedTheme, THEMES, type Theme } from './theme'
   import type { Workspace } from './workspace.svelte'
 
@@ -79,6 +80,19 @@
       <div class="segments" role="radiogroup" aria-labelledby="zoom-label">
         <button type="button" role="radio" aria-checked={zoomFollowsChat} onclick={() => pickZoom(true)}>Fit to chat</button>
         <button type="button" role="radio" aria-checked={!zoomFollowsChat} onclick={() => pickZoom(false)}>Fixed size</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label" id="quiz-mask-label">Quiz choices</span>
+      <span class="hint">
+        {quizMask.hideChoices
+          ? 'Each question’s choices stay covered until you click them, so you think of an answer first.'
+          : 'Each question shows its choices right away.'}
+      </span>
+      <div class="segments" role="radiogroup" aria-labelledby="quiz-mask-label">
+        <button type="button" role="radio" aria-checked={quizMask.hideChoices} onclick={() => setHideQuizChoices(true)}>Hidden until clicked</button>
+        <button type="button" role="radio" aria-checked={!quizMask.hideChoices} onclick={() => setHideQuizChoices(false)}>Shown</button>
       </div>
     </div>
   </div>

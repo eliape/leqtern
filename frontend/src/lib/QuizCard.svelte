@@ -2,6 +2,7 @@
   import { type CitableDocs, renderMarkdown } from './markdown'
   import type { QuizQuestion } from './api'
   import type { Quiz } from './workspace.svelte'
+  import { masksChoices, quizMask } from './quizMask.svelte'
 
   type Props = {
     quiz: Quiz
@@ -30,6 +31,12 @@
   let right = $derived(quiz.questions.filter((q, i) => quiz.picked[i] === q.answer).length)
   let question = $derived(quiz.questions[step])
   let picked = $derived(quiz.picked[step] ?? null)
+
+  // The question whose choices the reader uncovered; moving on hides the next one's again.
+  let revealedStep = $state<number | null>(null)
+  let masked = $derived(
+    quizMask.hideChoices && !!question && masksChoices(question) && picked === null && revealedStep !== step,
+  )
 
   /** Markdown on one line: choices have no paragraphs of their own. */
   const inline = (text: string) => renderMarkdown(text, docs).replace(/^<p>|<\/p>\s*$/g, '')
@@ -76,7 +83,12 @@
 
   {#if question}
     <div class="question markdown">{@html renderMarkdown(question.question, docs)}</div>
-    {@render choices(question, picked, true)}
+    <div class="choices-wrap">
+      <div class:covered={masked} inert={masked}>{@render choices(question, picked, true)}</div>
+      {#if masked}
+        <button type="button" class="mask" onclick={() => (revealedStep = step)}>Click to reveal</button>
+      {/if}
+    </div>
     {#if picked !== null}
       <div class="feedback" role="status">
         <p class="verdict" class:right={picked === question.answer}>
@@ -210,6 +222,35 @@
   .choice.wrong {
     border-color: var(--danger);
     background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  }
+  /* A frosted box over exactly the choices, until the reader clicks it. */
+  .choices-wrap {
+    position: relative;
+  }
+  .mask {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .mask:hover {
+    color: inherit;
+    background: color-mix(in srgb, var(--surface) 45%, transparent);
+  }
+  .mask:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .body {
     display: flex;

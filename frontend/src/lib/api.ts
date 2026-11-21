@@ -1,5 +1,7 @@
 /** One multiple-choice question: `answer` is the index of the right choice. */
 export type QuizQuestion = {
+  /** The kind of question; multiple choice when missing. Other kinds (true/false) may come later. */
+  kind?: 'choice'
   question: string
   choices: string[]
   answer: number

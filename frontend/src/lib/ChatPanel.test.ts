@@ -3,6 +3,7 @@ import { tick } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import ChatPanel from './ChatPanel.svelte'
 import type { PageContext } from './context'
+import { setHideQuizChoices } from './quizMask.svelte'
 import { chatOf, Workspace } from './workspace.svelte'
 
 function setup() {
@@ -267,6 +268,11 @@ describe('ChatPanel', () => {
     // jsdom can't style KaTeX's MathML, so these questions have no maths.
     const choices = within(quiz.getByRole('group', { name: 'Choices' })).getAllByRole('button')
     expect(choices.map((c) => c.textContent?.trim())).toEqual(['A x', 'B 2x'])
+    // The choices start covered (the default setting) and can't be picked until uncovered.
+    expect(choices[0].closest('.covered')).not.toBeNull()
+    await fireEvent.click(quiz.getByRole('button', { name: 'Click to reveal' }))
+    expect(choices[0].closest('.covered')).toBeNull()
+    expect(quiz.queryByRole('button', { name: 'Click to reveal' })).not.toBeInTheDocument()
     await fireEvent.click(choices[0])
     expect(choices[0]).toHaveClass('wrong')
     expect(choices[1]).toHaveClass('right')
@@ -279,6 +285,12 @@ describe('ChatPanel', () => {
 
     await fireEvent.click(quiz.getByRole('button', { name: 'Next question' }))
     expect(quiz.getByText('Question 2 of 2')).toBeInTheDocument()
+    // The next question's choices are covered again; turning the setting off uncovers them.
+    expect(quiz.getByRole('button', { name: 'Click to reveal' })).toBeInTheDocument()
+    setHideQuizChoices(false)
+    await tick()
+    expect(quiz.queryByRole('button', { name: 'Click to reveal' })).not.toBeInTheDocument()
+    setHideQuizChoices(true)
     await fireEvent.click(quiz.getByRole('button', { name: 'A small change' }))
     expect(quiz.getByRole('status')).toHaveTextContent('Right.')
     await fireEvent.click(quiz.getByRole('button', { name: 'See results' }))
