@@ -134,6 +134,12 @@ someone answering questions about the document can find where things are.
 - sections: every chapter, section and subsection whose heading is printed on these pages, \
 in reading order, with the PDF page numbers it spans here and how far down its start page \
 the heading is (top). Leave out sections continuing from earlier pages.
+  Stay at section level: leave out individual exercises, problems, examples, questions and \
+their solutions (like "Problem 2.47" or a bare "2.48"); list a heading that groups them, \
+such as "Exercises" or "3.2 Solutions to Problems", once. Leave out running headers and \
+footers repeated at the top or bottom of each page (a chapter or section title printed \
+next to the page number); list a section only where its heading starts it. Write each \
+heading with the capitals it has where it starts the section, not those of a running header.
 - entries: key terms, acronyms, definitions, numbered or important equations, figures and \
 tables, each with the PDF pages it is on. Skip passing mentions.
 - references: explicit pointers to other parts of this document or to other works, such as \
@@ -148,7 +154,8 @@ document's title, what kind of document it is, and a short summary of the whole 
 
 Also list heading_fixes: headings in the Sections list written differently from the others \
 at their level (numbering, capitals, punctuation), such as "IV SPACETIME" among chapters \
-like "III. Relativistic Optics", or at the wrong level. Leave headings that rightly differ, \
+like "III. Relativistic Optics", or "iv spacetime" written in lower case among \
+capitalised chapters, or at the wrong level. Leave headings that rightly differ, \
 like an appendix or index. List nothing when the headings are consistent."""
 
 
@@ -204,6 +211,25 @@ def clamp_chunk(chunk: ChunkIndex, start: int, end: int) -> ChunkIndex:
     return chunk
 
 
+# A single exercise, problem, example or question, like "Problem 2.47", "Exercise 3(b)" or a bare
+# "2.48": too fine for the outline when it sits under a section.
+EXERCISE = re.compile(
+    r"^\s*((problem|exercise|example|question|task|solution|answer|ex\.?|prob\.?)s?\s*)?"
+    r"\d+(\.\d+)*[a-z]?(\s*\([a-z0-9]+\))?\.?(\s*:.*|\s+[-–—]\s.*)?$",
+    re.IGNORECASE,
+)
+# A heading that starts with a section number, like "3.2 Solutions" or "IV. Spacetime".
+NUMBERED = re.compile(r"^\s*(\d+(\.\d+)*|[IVXLC]+\.)\s", re.IGNORECASE)
+
+
+def is_exercise(title: str) -> bool:
+    return bool(EXERCISE.match(title))
+
+
+def same_title(a: str, b: str) -> bool:
+    return " ".join(a.lower().split()) == " ".join(b.lower().split())
+
+
 # A heading the model marks as carried over, like "Exercises III (continued)", rather than
 # one printed on the page. Ends are worked out from the next heading instead.
 CONTINUED = re.compile(r"\(\s*cont(inued|\.)", re.IGNORECASE)
@@ -215,6 +241,10 @@ def merge_sections(sections: list[Section], page_count: int | None = None) -> li
     is (the model's own order where that isn't known). A section that runs across chunk
     boundaries is joined into one entry. With `page_count`, each section ends where the
     next one at its level or above begins.
+
+    Single exercises under a section are dropped, and so are running headers: a heading
+    seen again later, when it is numbered (numbers don't repeat) or when nothing at its
+    level or above started in between.
     """
     merged: list[Section] = []
     ordered = sorted(
@@ -222,11 +252,13 @@ def merge_sections(sections: list[Section], page_count: int | None = None) -> li
         key=lambda s: (s.start_page, s.top if s.top is not None else 0.0),
     )
     for s in ordered:
+        if is_exercise(s.title) and any(m.level < s.level for m in merged):
+            continue
         same = next(
             (
                 m
                 for m in reversed(merged)
-                if m.title.strip().lower() == s.title.strip().lower()
+                if same_title(m.title, s.title)
                 and m.level == s.level
                 and s.start_page <= m.end_page + 1
             ),
@@ -236,11 +268,73 @@ def merge_sections(sections: list[Section], page_count: int | None = None) -> li
             same.end_page = max(same.end_page, s.end_page)
             if s.summary and s.summary not in same.summary:
                 same.summary = f"{same.summary} {s.summary}".strip()
-        else:
+        elif not is_repeat(merged, s):
             merged.append(s.model_copy())
     if page_count:
         set_ends(merged, page_count)
     return merged
+
+
+def is_repeat(merged: list[Section], s: Section) -> bool:
+    """Whether `s` is a running header: an earlier heading printed again further on."""
+    for i in range(len(merged) - 1, -1, -1):
+        first = merged[i]
+        if same_title(first.title, s.title):
+            between = merged[i + 1 :]
+            return bool(NUMBERED.match(s.title)) or not any(m.level <= first.level for m in between)
+    return False
+
+
+SMALL_WORDS = {
+    "a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to",
+    "via", "vs", "with",
+}  # fmt: skip
+
+
+def match_capitals(sections: list[Section]) -> None:
+    """
+    Capitalise a heading written all in lower case when the others at its level have
+    capitals: in capitals, title case or sentence case, as most of them are.
+    """
+    for level in {s.level for s in sections}:
+        same = [s for s in sections if s.level == level]
+        styled = [s for s in same if any(c.isupper() for c in s.title)]
+        lower = [s for s in same if any(c.isalpha() for c in s.title) and s not in styled]
+        if not lower or len(styled) < 2 * len(lower):
+            continue
+        style = max(
+            ("upper", "title", "sentence"), key=lambda k: sum(caps(t.title) == k for t in styled)
+        )
+        for s in lower:
+            s.title = restyle(s.title, style)
+
+
+def words(title: str) -> list[str]:
+    return [w for w in title.split() if w[:1].isalpha()]
+
+
+def caps(title: str) -> str:
+    """How a heading is capitalised: upper, title or sentence."""
+    letters = [c for c in title if c.isalpha()]
+    if letters and all(c.isupper() for c in letters):
+        return "upper"
+    big = [w for w in words(title) if w.lower() not in SMALL_WORDS]
+    if len(big) > 1 and all(w[0].isupper() for w in big):
+        return "title"
+    return "sentence"
+
+
+def restyle(title: str, style: str) -> str:
+    if style == "upper":
+        return title.upper()
+    out, first = [], True
+    for w in title.split():
+        if w[:1].isalpha():
+            if first or (style == "title" and w not in SMALL_WORDS):
+                w = w[0].upper() + w[1:]
+            first = False
+        out.append(w)
+    return " ".join(out)
 
 
 def set_ends(sections: list[Section], page_count: int) -> None:
@@ -467,6 +561,9 @@ class Indexer:
         failed = next((r for r in results if isinstance(r, BaseException)), None)
         if failed:
             raise failed
+        # Again over the whole document, now that every chunk's headings are in.
+        index.sections = merge_sections(index.sections)
+        match_capitals(index.sections)
         summary = await self.summarize(client, doc, index)
         apply_heading_fixes(index.sections, summary.heading_fixes)
         set_ends(index.sections, doc.page_count)

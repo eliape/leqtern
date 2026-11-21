@@ -19,6 +19,7 @@ from leqtern.index import (
     apply_heading_fixes,
     chunk_ranges,
     clamp_chunk,
+    match_capitals,
     merge_entries,
     merge_sections,
     render_outline,
@@ -67,6 +68,59 @@ def test_drops_headings_marked_as_continued() -> None:
         Section(title="Continued fractions", level=2, start_page=43, end_page=44, summary=""),
     ]
     assert [s.title for s in merge_sections(sections)] == ["Exercises III", "Continued fractions"]
+
+
+def test_drops_single_exercises_and_running_headers() -> None:
+    def sec(title: str, level: int, page: int) -> Section:
+        return Section(title=title, level=level, start_page=page, end_page=page, summary="")
+
+    sections = [
+        sec("3 Solutions", 1, 50),
+        sec("3.1 Solutions to Problems in Special Relativity Theory", 2, 50),
+        sec("3.1 Solutions to Problems in Special Relativity Theory", 2, 52),
+        sec("Problem 1.12", 3, 51),
+        sec("3.2 Solutions to Problems in General Relativity Theory", 2, 60),
+        sec("2.47", 3, 61),
+        sec("Problem 2.48: Geodesics", 3, 62),
+        sec("3.2 Solutions to Problems in General Relativity Theory", 2, 63),
+        sec("Exercises", 2, 64),
+        sec("4 Cosmology", 1, 70),
+        sec("Exercises", 2, 80),
+    ]
+    assert [(s.title, s.start_page) for s in merge_sections(sections)] == [
+        ("3 Solutions", 50),
+        ("3.1 Solutions to Problems in Special Relativity Theory", 50),
+        ("3.2 Solutions to Problems in General Relativity Theory", 60),
+        ("Exercises", 64),
+        ("4 Cosmology", 70),
+        ("Exercises", 80),
+    ]
+
+
+def test_keeps_problems_that_are_the_top_level() -> None:
+    sections = [
+        Section(title=f"Problem {n}", level=1, start_page=n, end_page=n, summary="")
+        for n in (1, 2, 3)
+    ]
+    assert len(merge_sections(sections)) == 3
+
+
+def test_capitalises_a_lower_case_heading_like_the_others() -> None:
+    sections = [
+        Section(title=t, level=1, start_page=n, end_page=n, summary="")
+        for n, t in enumerate(
+            [
+                "1 Special Relativity",
+                "2 Tensor Algebra",
+                "3 the theory of gravitation",
+                "4 Black Holes",
+            ]
+        )
+    ]
+    sections.append(Section(title="4.1 the horizon", level=2, start_page=9, end_page=9, summary=""))
+    match_capitals(sections)
+    assert sections[2].title == "3 The Theory of Gravitation"
+    assert sections[4].title == "4.1 the horizon"  # nothing to compare it with
 
 
 def test_applies_heading_fixes_from_the_summary() -> None:
