@@ -1,3 +1,5 @@
+import { firstOpen, isAnswered, isTyped, rightCount, typedText, ungraded } from './quiz'
+import { DEFAULT_TYPED_SHARE, quizTyped } from './quizMask.svelte'
 import {
   type AnswerStream,
   type AskRequest,
@@ -8,6 +10,7 @@ import {
   fetchIndexStatus,
   fetchPdf,
   fetchRecommendation,
+  type QuizReview,
   forgetRegister,
   type IndexStatus,
   type Hints,
@@ -95,7 +98,7 @@ const realIndexApi: IndexApi = {
 
 /** Where notes on what to review after a quiz come from. Tests pass fakes. */
 export type QuizApi = {
-  recommend: (request: RecommendationRequest) => Promise<string | null>
+  recommend: (request: RecommendationRequest) => Promise<QuizReview>
 }
 
 /** What Quiz me in the right-click menu puts in the question box. */
@@ -731,9 +734,18 @@ export class Workspace {
     if (hints && hints.revealed < hints.items.length) hints.revealed++
   }
 
+  /** A quiz in one of a topic's discussions, with the discussion and the request for it. */
+  private quizAt(topicId: string, messageId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const chat = topic?.chats.find((c) => c.messages.some((m) => m.id === messageId))
+    const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1
+    const quiz = chat?.messages[index]?.quiz
+    return topic && chat && quiz ? { topic, quiz, asked: chat.messages[index - 1] } : undefined
+  }
+
   /**
-   * Record the reader's pick for one of a quiz's questions (each is answered once). Once
-   * all are answered and some were wrong, Haiku writes a note on what to review.
+   * Record the reader's pick for one of a quiz's multiple-choice questions (each is answered
+   * once). Once all questions are answered, see `review`.
    */
   async answerQuiz(
     topicId: string,
@@ -742,18 +754,37 @@ export class Workspace {
     choice: number,
     api: QuizApi = this.quizApi,
   ): Promise<void> {
-    const topic = this.topics.find((t) => t.id === topicId)
-    const chat = topic?.chats.find((c) => c.messages.some((m) => m.id === messageId))
-    const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1
-    const quiz = chat?.messages[index]?.quiz
-    if (!topic || !chat || !quiz || quiz.picked[question] !== null || !quiz.questions[question]?.choices[choice]) return
-    quiz.picked[question] = choice
-    const right = quiz.questions.filter((q, i) => quiz.picked[i] === q.answer).length
-    if (quiz.picked.some((p) => p === null) || right === quiz.questions.length) return
-    const asked = chat.messages[index - 1]
+    const at = this.quizAt(topicId, messageId)
+    if (!at || isTyped(at.quiz, question) || isAnswered(at.quiz, question) || !at.quiz.questions[question]?.choices[choice]) return
+    at.quiz.picked[question] = choice
+    await this.review(at, api)
+  }
+
+  /**
+   * Keep what the reader typed for a question: their answer to a typed question (answered
+   * once; graded with the rest at the end), or a guess before uncovering a multiple-choice
+   * question's choices, which is kept but not graded.
+   */
+  async typeQuiz(topicId: string, messageId: string, question: number, text: string, api: QuizApi = this.quizApi): Promise<void> {
+    const at = this.quizAt(topicId, messageId)
+    if (!at || !text.trim() || !at.quiz.questions[question] || isAnswered(at.quiz, question)) return
+    const { quiz } = at
+    if (!quiz.typed) quiz.typed = quiz.questions.map(() => null)
+    if (!isTyped(quiz, question) && typedText(quiz, question) !== null) return
+    quiz.typed[question] = text.trim()
+    if (isTyped(quiz, question)) await this.review(at, api)
+  }
+
+  /**
+   * Once every question is answered, Haiku grades the typed answers and writes a note on what
+   * to review, in one call; nothing to do when there is nothing to grade and every choice was right.
+   */
+  private async review({ topic, quiz, asked }: { topic: Topic; quiz: Quiz; asked?: ChatMessage }, api: QuizApi): Promise<void> {
+    if (quiz.questions.some((_, n) => !isAnswered(quiz, n))) return
+    if (!ungraded(quiz) && rightCount(quiz) === quiz.questions.length) return
     quiz.reviewing = 'writing'
     try {
-      const recommendation = await api.recommend({
+      const { text, grades } = await api.recommend({
         topic: topic.name,
         about: {
           role: 'user',
@@ -762,7 +793,8 @@ export class Workspace {
         },
         quiz: quizRecord(quiz),
       })
-      if (recommendation) quiz.recommendation = recommendation
+      if (grades.some(Boolean)) quiz.grades = quiz.questions.map((_, n) => grades[n] ?? quiz.grades?.[n] ?? null)
+      if (text) quiz.recommendation = text
       quiz.reviewing = undefined
     } catch {
       quiz.reviewing = 'failed'
@@ -841,6 +873,7 @@ export class Workspace {
         ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name),
         ...(this.answerEffort && { effort: this.answerEffort }),
         ...(instructions && { instructions }),
+        ...(quizTyped.share !== DEFAULT_TYPED_SHARE && { typed_share: quizTyped.share }),
       }
       await respond(answer, request, controller.signal)
       if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
@@ -1180,8 +1213,8 @@ function restoredMessage(message: ChatMessage): ChatMessage {
 }
 
 /** A quiz as the backend reads it. */
-function quizRecord({ title, questions, picked, recommendation }: Quiz): QuizRecord {
-  return { title, questions, picked, ...(recommendation && { recommendation }) }
+function quizRecord({ title, questions, picked, typed, grades, recommendation }: Quiz): QuizRecord {
+  return { title, questions, picked, ...(typed && { typed }), ...(grades && { grades }), ...(recommendation && { recommendation }) }
 }
 
 /**
@@ -1286,8 +1319,9 @@ function turnKey(message: ChatMessage): string {
   const { quiz, hints } = message
   if (hints) return `${message.id}/h${hints.revealed}`
   if (!quiz) return message.id
-  const answered = quiz.picked.filter((p) => p !== null).length
-  return `${message.id}/${answered}${quiz.recommendation ? '+' : ''}`
+  const answered = quiz.questions.filter((_, n) => isAnswered(quiz, n)).length
+  const graded = quiz.grades?.filter(Boolean).length ?? 0
+  return `${message.id}/${answered}${graded ? `g${graded}` : ''}${quiz.recommendation ? '+' : ''}`
 }
 
 /**
@@ -1298,9 +1332,8 @@ export function openCard(messages: ChatMessage[]): OpenCard | undefined {
   const answers = messages.filter((m) => m.role === 'assistant').slice(-2).reverse()
   const card = answers.find((m) => m.quiz || m.hints?.revealed)
   if (card?.quiz) {
-    const { questions, picked } = card.quiz
-    const first = picked.findIndex((p) => p === null)
-    const i = card.openCard ?? (first === -1 ? questions.length : first)
+    const { questions } = card.quiz
+    const i = card.openCard ?? firstOpen(card.quiz)
     const q = questions[i]
     return q && { kind: 'quiz', number: i + 1, of: questions.length, text: q.question }
   }

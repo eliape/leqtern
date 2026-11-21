@@ -3,34 +3,62 @@
   import type { QuizQuestion } from './api'
   import type { Quiz } from './workspace.svelte'
   import { masksChoices, quizMask } from './quizMask.svelte'
+  import { firstOpen, isAnswered, isRight, isTyped, rightCount, typedText } from './quiz'
 
   type Props = {
     quiz: Quiz
     /** The reader picked a choice for a question. Each question is answered once. */
     onpick: (question: number, choice: number) => void
+    /** The reader typed an answer to a typed question, or a guess before uncovering the choices. */
+    ontype?: (question: number, text: string) => void
     /** The question on show changed (the number of questions for the results). */
     onopen?: (question: number) => void
     /** What the quiz's citations can point at, as in answers. */
     docs?: CitableDocs
   }
 
-  let { quiz, onpick, onopen, docs }: Props = $props()
+  let { quiz, onpick, ontype, onopen, docs }: Props = $props()
 
   const LETTERS = 'ABCDEFGH'
   const total = $derived(quiz.questions.length)
 
   // Which question is showing; `total` shows the results. Starts at the first one not yet
   // answered, so a quiz left halfway (or reloaded) carries on where it was.
-  const firstOpen = () => {
-    const i = quiz.picked.findIndex((p) => p === null)
-    return i === -1 ? quiz.questions.length : i
-  }
-  let step = $state(firstOpen())
+  const start = () => firstOpen(quiz)
+  let step = $state(start())
   $effect(() => onopen?.(step))
 
-  let right = $derived(quiz.questions.filter((q, i) => quiz.picked[i] === q.answer).length)
+  let right = $derived(rightCount(quiz))
   let question = $derived(quiz.questions[step])
   let picked = $derived(quiz.picked[step] ?? null)
+  let typed = $derived(isTyped(quiz, step))
+  let answered = $derived(!!question && isAnswered(quiz, step))
+  // What the reader is typing: a typed answer, or a guess on the mask. Cleared for each question.
+  let draft = $state('')
+  let draftStep = $state(-1)
+  $effect(() => {
+    if (draftStep !== step) ((draft = ''), (draftStep = step))
+  })
+
+  /** Uncover the choices, keeping a guess if one was typed. */
+  function reveal() {
+    if (draft.trim()) ontype?.(step, draft)
+    revealedStep = step
+  }
+
+  function submitTyped() {
+    if (draft.trim()) ontype?.(step, draft)
+  }
+
+  /** Enter sends, Shift+Enter starts a new line. */
+  function onTypedKey(event: KeyboardEvent, send: () => void) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault()
+      send()
+    }
+  }
+
+  const VERDICTS = { right: 'Right', partly: 'Partly right', wrong: 'Not right' } as const
 
   // The question whose choices the reader uncovered; moving on hides the next one's again.
   let revealedStep = $state<number | null>(null)
@@ -83,22 +111,68 @@
 
   {#if question}
     <div class="question markdown">{@html renderMarkdown(question.question, docs)}</div>
-    <div class="choices-wrap">
-      <div class:covered={masked} inert={masked}>{@render choices(question, picked, true)}</div>
-      {#if masked}
-        <button type="button" class="mask" onclick={() => (revealedStep = step)}>Click to reveal</button>
+    {#if typed}
+      {#if !answered}
+        <div class="typed">
+          <textarea
+            class="answer-box"
+            rows="2"
+            placeholder="Type your answer"
+            aria-label="Your answer"
+            bind:value={draft}
+            onkeydown={(e) => onTypedKey(e, submitTyped)}
+          ></textarea>
+          <button type="button" class="next" disabled={!draft.trim()} onclick={submitTyped}>Submit</button>
+        </div>
+      {:else}
+        <div class="feedback" role="status">
+          <p class="wrote"><span class="label">You wrote</span> {typedText(quiz, step)}</p>
+          <div class="model-answer">
+            <span class="label">Model answer</span>
+            <div class="markdown">{@html renderMarkdown(question.model_answer ?? '', docs)}</div>
+          </div>
+          <div class="markdown">{@html renderMarkdown(question.explanation, docs)}</div>
+          <p class="muted-note">Compare with the model answer; it is graded with the rest at the end.</p>
+          <button type="button" class="next" onclick={() => ((step += 1), (filling = step === total))}>
+            {step + 1 < total ? 'Next question' : 'See results'}
+          </button>
+        </div>
       {/if}
-    </div>
-    {#if picked !== null}
-      <div class="feedback" role="status">
-        <p class="verdict" class:right={picked === question.answer}>
-          {picked === question.answer ? 'Right.' : `Not quite: the answer is ${LETTERS[question.answer]}.`}
-        </p>
-        <div class="markdown">{@html renderMarkdown(question.explanation, docs)}</div>
-        <button type="button" class="next" onclick={() => ((step += 1), (filling = step === total))}>
-          {step + 1 < total ? 'Next question' : 'See results'}
-        </button>
+    {:else}
+      <div class="choices-wrap">
+        <div class:covered={masked} inert={masked}>{@render choices(question, picked, true)}</div>
+        {#if masked}
+          <!-- Clicking anywhere on the mask but the guess box uncovers the choices. -->
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="mask" onclick={(e) => (e.target as HTMLElement).closest('input') || reveal()}>
+            <button type="button" class="reveal" onclick={(e) => (e.stopPropagation(), reveal())}>Click to reveal</button>
+            {#if ontype}
+              <input
+                class="guess"
+                type="text"
+                placeholder="Or type a guess first"
+                aria-label="Your guess"
+                bind:value={draft}
+                onkeydown={(e) => onTypedKey(e, reveal)}
+              />
+            {/if}
+          </div>
+        {/if}
       </div>
+      {#if picked !== null}
+        <div class="feedback" role="status">
+          <p class="verdict" class:right={picked === question.answer}>
+            {picked === question.answer ? 'Right.' : `Not quite: the answer is ${LETTERS[question.answer]}.`}
+          </p>
+          {#if typedText(quiz, step)}
+            <p class="wrote"><span class="label">Your guess</span> {typedText(quiz, step)}</p>
+          {/if}
+          <div class="markdown">{@html renderMarkdown(question.explanation, docs)}</div>
+          <button type="button" class="next" onclick={() => ((step += 1), (filling = step === total))}>
+            {step + 1 < total ? 'Next question' : 'See results'}
+          </button>
+        </div>
+      {/if}
     {/if}
   {:else}
     <div class="score" role="img" aria-label={`You got ${right} of ${total} right`}>
@@ -126,9 +200,15 @@
         <div class="markdown">{@html renderMarkdown(quiz.recommendation, docs)}</div>
       </div>
     {:else if quiz.reviewing === 'writing'}
-      <p class="advice muted">Writing a note on what to review…</p>
+      <p class="advice muted">
+        {quiz.questions.some((_, i) => isTyped(quiz, i)) ? 'Grading your answers…' : 'Writing a note on what to review…'}
+      </p>
     {:else if quiz.reviewing === 'failed'}
-      <p class="advice muted">Could not write a note on what to review.</p>
+      <p class="advice muted">
+        {quiz.questions.some((_, i) => isTyped(quiz, i) && !quiz.grades?.[i])
+          ? 'Could not grade your answers.'
+          : 'Could not write a note on what to review.'}
+      </p>
     {/if}
     <button type="button" class="details-toggle" aria-expanded={details} onclick={() => (details = !details)}>
       {details ? 'Hide details' : 'Details'}
@@ -137,14 +217,34 @@
       <ol class="details">
         {#each quiz.questions as q, i (i)}
           {@const choice = quiz.picked[i] ?? null}
+          {@const ok = isRight(quiz, i)}
+          {@const grade = quiz.grades?.[i] ?? null}
           <li>
             <div class="question markdown">
-              <span class="mark" class:right={choice === q.answer} aria-label={choice === q.answer ? 'Right' : 'Wrong'}
-                >{choice === q.answer ? '✓' : '✗'}</span
+              <span class="mark" class:right={ok} class:partly={grade?.verdict === 'partly'} aria-label={ok ? 'Right' : grade?.verdict === 'partly' ? 'Partly right' : 'Wrong'}
+                >{ok ? '✓' : grade?.verdict === 'partly' ? '½' : '✗'}</span
               >
               {@html renderMarkdown(q.question, docs)}
             </div>
-            {@render choices(q, choice, false)}
+            {#if isTyped(quiz, i)}
+              <p class="wrote"><span class="label">You wrote</span> {typedText(quiz, i) ?? '–'}</p>
+              {#if grade}
+                <p class="grade" class:right={ok} class:partly={grade.verdict === 'partly'}>
+                  {VERDICTS[grade.verdict]}.{grade.feedback ? ` ${grade.feedback}` : ''}
+                </p>
+              {:else if quiz.reviewing === 'writing'}
+                <p class="muted-note">Grading…</p>
+              {/if}
+              <div class="model-answer">
+                <span class="label">Model answer</span>
+                <div class="markdown">{@html renderMarkdown(q.model_answer ?? '', docs)}</div>
+              </div>
+            {:else}
+              {@render choices(q, choice, false)}
+              {#if typedText(quiz, i)}
+                <p class="wrote"><span class="label">Your guess</span> {typedText(quiz, i)}</p>
+              {/if}
+            {/if}
             <div class="markdown explanation">{@html renderMarkdown(q.explanation, docs)}</div>
           </li>
         {/each}
@@ -230,9 +330,12 @@
   .mask {
     position: absolute;
     inset: 0;
-    display: grid;
-    place-items: center;
-    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: color-mix(in srgb, var(--surface) 55%, transparent);
@@ -248,9 +351,85 @@
     color: inherit;
     background: color-mix(in srgb, var(--surface) 45%, transparent);
   }
-  .mask:focus-visible {
+  .reveal {
+    padding: 0.2rem 0.6rem;
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .reveal:focus-visible,
+  .guess:focus-visible,
+  .answer-box:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
+  }
+  .guess,
+  .answer-box {
+    box-sizing: border-box;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    font-weight: 400;
+    font-size: 0.9rem;
+  }
+  .guess {
+    width: min(18rem, 90%);
+    cursor: text;
+  }
+  .typed {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .answer-box {
+    width: 100%;
+    resize: vertical;
+  }
+  .next:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .wrote,
+  .grade {
+    margin: 0;
+  }
+  .label {
+    margin-right: 0.35rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .model-answer {
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .model-answer .label {
+    display: block;
+    margin-bottom: 0.1rem;
+  }
+  .grade {
+    font-weight: 600;
+    color: var(--danger);
+  }
+  .grade.right {
+    color: var(--right);
+  }
+  .grade.partly,
+  .mark.partly {
+    color: var(--quiz);
+  }
+  .muted-note {
+    margin: 0;
+    font-size: 0.85em;
+    color: var(--muted);
   }
   .body {
     display: flex;

@@ -1,20 +1,38 @@
-/** One multiple-choice question: `answer` is the index of the right choice. */
+/**
+ * One question. Multiple choice (`kind` 'choice' or missing): `answer` is the index of the right
+ * choice. Typed: the reader types an answer, compared with `model_answer`; no choices, `answer` -1.
+ */
 export type QuizQuestion = {
-  /** The kind of question; multiple choice when missing. Other kinds (true/false) may come later. */
-  kind?: 'choice'
+  kind?: 'choice' | 'typed'
   question: string
   choices: string[]
   answer: number
   explanation: string
   /** For each choice, the mistake that leads to it; null for the right one. Older quizzes have none. */
   misconceptions?: (string | null)[]
+  /** Typed questions: the answer, and what an answer must get right to count. */
+  model_answer?: string | null
+  key_points?: string[]
 }
+
+/** How a typed answer was graded, with a sentence on what was missing or wrong. */
+export type Grade = { verdict: 'right' | 'partly' | 'wrong'; feedback: string }
 
 /** A quiz as the model writes it. */
 export type WrittenQuiz = { title: string; questions: QuizQuestion[] }
 
-/** A quiz as the chat keeps it: with the reader's pick for each question, and what to review. */
-export type QuizRecord = WrittenQuiz & { picked: (number | null)[]; recommendation?: string }
+/**
+ * A quiz as the chat keeps it: the reader's pick for each multiple-choice question; what they
+ * typed for each question (a typed answer, or a guess before seeing the choices); grades for
+ * what they typed (typed answers only, for now; guesses could earn bonus points later); and
+ * what to review. Older quizzes have no `typed` or `grades`.
+ */
+export type QuizRecord = WrittenQuiz & {
+  picked: (number | null)[]
+  typed?: (string | null)[]
+  grades?: (Grade | null)[]
+  recommendation?: string
+}
 
 /** One turn of the conversation, as the backend reads it. */
 export type AskTurn = {
@@ -53,6 +71,8 @@ export type AskRequest = {
   /** What the topic covers and what the reader studies it for, and the conventions its answers follow, in their words. */
   scope?: string
   conventions?: string
+  /** The most of a quiz's questions that may be typed, from 0 to 1. The backend's default (0.4) when left out. */
+  typed_share?: number
 }
 
 /**
@@ -225,15 +245,19 @@ export async function saveWorkspace(
 /** What a finished quiz was about (the request for it) and how it went. */
 export type RecommendationRequest = { topic: string; about: AskTurn; quiz: QuizRecord }
 
-/** A short note on what to review after a quiz, or null when every answer was right. */
-export async function fetchRecommendation(request: RecommendationRequest, fetchFn: typeof fetch = fetch): Promise<string | null> {
+/** After a quiz: grades for its typed answers (by question, null for the rest) and what to review. */
+export type QuizReview = { text: string | null; grades: (Grade | null)[] }
+
+/** Grades for a quiz's typed answers and a short note on what to review (null when every answer was right). */
+export async function fetchRecommendation(request: RecommendationRequest, fetchFn: typeof fetch = fetch): Promise<QuizReview> {
   const res = await fetchFn('/api/quiz/recommendation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   })
   if (!res.ok) throw await backendError(res)
-  return ((await res.json()) as { text: string | null }).text
+  const review = (await res.json()) as Partial<QuizReview>
+  return { text: review.text ?? null, grades: review.grades ?? [] }
 }
 
 /** The first question of a discussion, for Haiku to name it. */
