@@ -311,8 +311,8 @@
                   aria-expanded={discussionsOpen}
                   onclick={() => (topic.discussionsOpen = !discussionsOpen)}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
                   Discussions
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
                 </button>
               </h3>
               {#if discussionsOpen}
@@ -427,8 +427,8 @@
                   aria-expanded={sourcesOpen}
                   onclick={() => (topic.sourcesOpen = !sourcesOpen)}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
                   Sources
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
                 </button>
               </h3>
               {#if sourcesOpen}
@@ -874,11 +874,12 @@
     font-weight: normal;
     color: var(--muted);
   }
+  /* The label first, level with the topic's name, then its arrow. */
   .list-toggle {
     display: flex;
     align-items: center;
-    gap: 0.125rem;
-    padding: 0;
+    gap: 0.25rem;
+    padding: 0 0 0 0.2rem;
     border: none;
     background: none;
     color: inherit;
@@ -950,9 +951,9 @@
     visibility: visible;
   }
   /* The line down the left, and a short branch out to each title; the last one turns the corner.
-     The line drops from the tip of the header's arrow: the arrow is centred 0.4rem into its 0.8rem box,
-     which starts 0.475rem left of these rows (0.875rem list indent - 0.375rem header pull + 0.5rem ul
-     margin, less 0.5rem). A branch starts just right of the line, so the two never overlap. */
+     The line sits 0.475rem left of these rows, under the start of the section's label (0.875rem list
+     indent - 0.375rem header pull + 0.4rem, measured from the ul's 0.5rem margin). A branch starts
+     just right of the line, so the two never overlap. */
   li.discussion {
     --trunk: calc(-0.475rem - 0.5px);
   }
