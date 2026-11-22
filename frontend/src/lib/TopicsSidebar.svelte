@@ -617,7 +617,7 @@
 {#if hoverCard && workspace.docs[hoverCard.id]}
   {@const doc = workspace.docs[hoverCard.id]}
   <div class="source-card" role="tooltip" style:top="{hoverCard.top}px" style:left="{hoverCard.left}px">
-    <div class="source-title">{workspace.indexing[hoverCard.id]?.title || doc.name}</div>
+    <div class="source-title">{(!doc.renamed && workspace.indexing[hoverCard.id]?.title) || doc.name}</div>
     <div class="source-kind">{kindLabel(hoverCard.id)}</div>
   </div>
 {/if}

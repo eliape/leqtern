@@ -204,6 +204,7 @@ describe('Workspace', () => {
     expect(ws.docs[doc.id].name).toBe('Week 3 notes')
     ws.renameDoc(doc.id, '  ')
     expect(ws.docs[doc.id].name).toBe('Week 3 notes')
+    expect(ws.docs[doc.id].renamed).toBe(true)
 
     const topic = ws.activeTopic!
     topic.draft = 'What is a basis?'

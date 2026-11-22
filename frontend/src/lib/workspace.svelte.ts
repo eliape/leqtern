@@ -30,7 +30,8 @@ import { type FlashcardRequest, forgetDeck } from './flashcards'
  * A PDF opened in a topic. Each one is a tab. `data` is the PDF itself. A tab brought back from the saved workspace gets it from the backend
  * once it is shown (see loadPdf), so until then it has none.
  */
-export type Doc = { id: string; name: string; data?: Uint8Array }
+/** `renamed` once the user has named it: that name then also replaces the index's title on the sidebar's card. */
+export type Doc = { id: string; name: string; data?: Uint8Array; renamed?: boolean }
 
 /**
  * A quiz in the chat, with the reader's pick for each question (null until answered) and,
@@ -191,6 +192,7 @@ export type Topic = {
 export type SavedDoc = {
   id: string
   name: string
+  renamed?: boolean
   serverId: string
   page?: number
 }
@@ -335,7 +337,7 @@ export class Workspace {
   /** Rename a source: the sidebar, its tab and the model all go by the new name. */
   renameDoc(id: string, name: string) {
     const doc = this.docs[id]
-    if (doc && name.trim()) this.docs = { ...this.docs, [id]: { ...doc, name: name.trim() } }
+    if (doc && name.trim()) this.docs = { ...this.docs, [id]: { ...doc, name: name.trim(), renamed: true } }
   }
 
   /** Put a topic away in the Archive. If it was open, the next topic that is not archived is. */
@@ -1113,7 +1115,8 @@ export class Workspace {
         const docs = topic.docIds.flatMap((id): SavedDoc[] => {
           const serverId = this.indexing[id]?.serverId
           const page = this.pages[id]
-          return serverId ? [{ id, name: this.docs[id].name, serverId, ...(page > 1 && { page }) }] : []
+          const { name, renamed } = this.docs[id]
+          return serverId ? [{ id, name, serverId, ...(renamed && { renamed }), ...(page > 1 && { page }) }] : []
         })
         return {
           id: topic.id,
@@ -1147,7 +1150,7 @@ export class Workspace {
     const indexing: Record<string, IndexState> = {}
     const pages: Record<string, number> = {}
     for (const d of saved.topics.flatMap((t) => t.docs)) {
-      docs[d.id] = { id: d.id, name: d.name }
+      docs[d.id] = { id: d.id, name: d.name, ...(d.renamed && { renamed: true }) }
       indexing[d.id] = { serverId: d.serverId, status: 'queued', pagesDone: 0, pageCount: 0 }
       if (d.page) pages[d.id] = d.page
     }
