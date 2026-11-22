@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CardHover } from './cardHover.svelte'
-  import type { Workspace } from './workspace.svelte'
+  import { chatTitle, type Chat, type Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
@@ -37,21 +37,25 @@
     }
   }
 
-  /** When a question was last sent in any of the topic's discussions, as "18 h ago". */
-  function lastChatLabel(topicId: string): string {
-    const topic = workspace.topics.find((t) => t.id === topicId)
-    const chats = topic?.chats.filter((c) => c.messages.length) ?? []
-    if (chats.length === 0) return 'No chats yet'
-    const last = Math.max(...chats.map((c) => c.updatedAt))
+  function chatOf(id: string): Chat | undefined {
+    for (const topic of workspace.topics) {
+      const chat = topic.chats.find((c) => c.id === id)
+      if (chat) return chat
+    }
+  }
+
+  /** When a question was last sent in the discussion, as "18 h ago". */
+  function lastChatLabel(chat: Chat): string {
+    if (chat.messages.length === 0) return 'No messages yet'
     // Saved before times were recorded.
-    if (!last) return 'Last chat: not known'
-    const minutes = Math.floor((Date.now() - last) / 60_000)
+    if (!chat.updatedAt) return 'Last chat: not known'
+    const minutes = Math.floor((Date.now() - chat.updatedAt) / 60_000)
     if (minutes < 1) return 'Last chat just now'
     if (minutes < 60) return `Last chat ${minutes} min ago`
     if (minutes < 24 * 60) return `Last chat ${Math.floor(minutes / 60)} h ago`
     const days = Math.floor(minutes / (24 * 60))
     if (days < 30) return `Last chat ${days} ${days === 1 ? 'day' : 'days'} ago`
-    return `Last chat ${new Date(last).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
+    return `Last chat ${new Date(chat.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
   }
 
   function uploadedLabel(seconds: number | undefined): string {
@@ -60,10 +64,10 @@
   }
 </script>
 
-{#if hover.spot && workspace.topics.some((t) => t.id === hover.spot?.id)}
-  {@const topic = workspace.topics.find((t) => t.id === hover.spot?.id)!}
+{#if hover.spot && chatOf(hover.spot.id)}
+  {@const chat = chatOf(hover.spot.id)!}
   <div
-    class="source-card topic-card {placement}"
+    class="source-card chat-card {placement}"
     role="tooltip"
     style:top="{hover.spot.y}px"
     style:left="{hover.spot.x}px"
@@ -76,8 +80,8 @@
       onhover?.(false)
     }}
   >
-    <div class="source-title">{topic.name}</div>
-    <div class="source-kind">{lastChatLabel(topic.id)}</div>
+    <div class="source-title">{chatTitle(chat)}</div>
+    <div class="source-kind">{lastChatLabel(chat)}</div>
   </div>
 {:else if hover.spot && workspace.docs[hover.spot.id]}
   {@const id = hover.spot.id}
@@ -159,7 +163,7 @@
     }
   }
   /* No (i) icon in the corner, so no room kept for it. */
-  .source-card.topic-card {
+  .source-card.chat-card {
     padding-right: 0.75rem;
   }
   .source-title {
