@@ -17,6 +17,8 @@ function offline() {
 
 beforeEach(() => {
   vi.stubGlobal('fetch', offline())
+  // Most tests use the topics, so the sidebar starts pinned. The tests of peeking unpin it.
+  localStorage.setItem('leqtern.sidebarPinned', '1')
 })
 
 afterEach(() => {
@@ -25,10 +27,13 @@ afterEach(() => {
   localStorage.clear()
 })
 
-/** Adding a PDF folds the sidebar away; open it again to use the topics. */
+/** Pin the sidebar open, unless it already is. */
 async function showTopics() {
-  await fireEvent.click(screen.getByRole('button', { name: 'Show topics' }))
+  const pin = screen.queryByRole('button', { name: 'Show topics' })
+  if (pin) await fireEvent.click(pin)
 }
+
+const topicsSidebar = () => screen.getByRole('complementary', { name: 'Topics', hidden: true }) as HTMLElement & { inert: boolean }
 
 const pdf = (name: string, body = '%PDF-1.7') => new File([body], name, { type: 'application/pdf' })
 
@@ -224,7 +229,7 @@ describe('App', () => {
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
   })
 
-  it('opens several picked PDFs at once as tabs in one topic, on the first, and folds the sidebar away', async () => {
+  it('opens several picked PDFs at once as tabs in one topic, on the first', async () => {
     renderOffline()
     await fireEvent.change(screen.getByTestId('file-input'), {
       target: { files: [pdf('Lecture 4.pdf'), pdf('Course book.pdf', '%PDF-1.7 book'), pdf('Old exam.pdf', '%PDF-1.7 exam')] },
@@ -234,8 +239,6 @@ describe('App', () => {
       expect.arrayContaining(['Lecture 4.pdf', 'Course book.pdf', 'Old exam.pdf']),
     )
     expect(screen.getByRole('tab', { name: 'Lecture 4.pdf', selected: true })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
-    await showTopics()
     expect(screen.getAllByRole('button', { name: /^Actions for (?!.*\.pdf)/ })).toHaveLength(1)
   })
 
@@ -317,40 +320,51 @@ describe('App', () => {
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
   })
 
-  it('collapses the sidebar to a strip that keeps the menu and New topic buttons', async () => {
+  it('peeks the sidebar out while its button or the sidebar is hovered, and pins it on a click', async () => {
+    localStorage.removeItem('leqtern.sidebarPinned')
     renderOffline()
-    const sidebar = screen.getByRole('complementary', { name: 'Topics' })
-    const toggle = within(sidebar).getByRole('button', { name: 'Hide topics' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    const toggle = screen.getByRole('button', { name: 'Show topics' })
+    expect(topicsSidebar().inert).toBe(true)
+    // Hovering the button peeks it out, floating and see-through.
+    await fireEvent.pointerEnter(toggle)
+    expect(topicsSidebar().inert).toBe(false)
+    expect(topicsSidebar()).not.toHaveClass('pinned')
+    // Over to the sidebar: it stays. Away from both: it goes shortly after.
+    await fireEvent.pointerLeave(toggle)
+    await fireEvent.pointerEnter(topicsSidebar())
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(topicsSidebar().inert).toBe(false)
+    await fireEvent.pointerLeave(topicsSidebar())
+    await waitFor(() => expect(topicsSidebar().inert).toBe(true))
+
+    // A click pins it, and that is remembered.
     await fireEvent.click(toggle)
-
-    // The contents stay while the sidebar slides shut, then go.
-    await waitFor(() => expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument())
-    expect(within(sidebar).queryByRole('heading', { name: 'Leqtern' })).not.toBeInTheDocument()
-    expect(within(sidebar).getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
-    expect(within(sidebar).getByRole('button', { name: 'New topic' })).toBeInTheDocument()
-
-    await fireEvent.click(within(sidebar).getByRole('button', { name: 'Show topics' }))
-    expect(within(sidebar).getByRole('heading', { name: 'Topics' })).toBeInTheDocument()
+    expect(toggle).toHaveAccessibleName('Hide topics')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(topicsSidebar()).toHaveClass('pinned')
+    expect(localStorage.getItem('leqtern.sidebarPinned')).toBe('1')
+    await fireEvent.pointerLeave(toggle)
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(topicsSidebar().inert).toBe(false)
+    await fireEvent.click(toggle)
+    expect(localStorage.getItem('leqtern.sidebarPinned')).toBe('0')
   })
 
-  it('starts every load with the sidebar open and the chat closed, whatever an earlier visit left', () => {
-    localStorage.setItem('doc-digest.sidebarOpen', 'false')
+  it('starts with the sidebar pinned or not as it was left, and the chat closed', () => {
     localStorage.setItem('doc-digest.chatOpen', 'true')
     renderOffline()
     expect(screen.getByRole('button', { name: 'Hide topics' })).toHaveAttribute('aria-expanded', 'true')
     expect((screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }).inert).toBe(true)
   })
 
-  it('folds the sidebar away when a PDF is added, every time', async () => {
+  it('ends a peek when a PDF is added, but leaves a pinned sidebar', async () => {
     renderOffline()
-    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     await pick(pdf('a.pdf', 'a'))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
-
-    await showTopics()
+    expect(topicsSidebar().inert).toBe(false)
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide topics' }))
+    expect(topicsSidebar().inert).toBe(false)
     await pick(pdf('b.pdf', 'b'))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(true)
   })
 
   it('leaves the sidebar open when the file is not a PDF', async () => {
@@ -378,25 +392,22 @@ describe('App', () => {
     expect(document.title).toBe('Stats · Leqtern')
   })
 
-  it('folds the sidebar away once a new topic is named, but not when a topic is only renamed', async () => {
+  it('keeps the sidebar open once a new topic is named, and when a topic is renamed', async () => {
     renderOffline()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
     await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
-    // Still open while the name is being typed.
     const name = sidebar.getByLabelText('Topic name')
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     await fireEvent.input(name, { target: { value: 'Statistics' } })
     await fireEvent.submit(name)
-    expect(sidebar.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
 
-    await showTopics()
     await fireEvent.click(sidebar.getByRole('button', { name: 'Actions for Statistics' }))
     await fireEvent.click(sidebar.getByRole('menuitem', { name: 'Rename' }))
     const again = sidebar.getByLabelText('Topic name')
     await fireEvent.input(again, { target: { value: 'Stats' } })
     await fireEvent.submit(again)
     expect(sidebar.getByRole('button', { name: /^Stats/ })).toBeInTheDocument()
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(false)
   })
 
   it('puts rename and delete in a three-dot menu on each topic that closes on Escape or an outside click', async () => {
@@ -457,29 +468,26 @@ describe('App', () => {
     expect(sidebar.queryByLabelText('Topic name')).not.toBeInTheDocument()
     expect(sidebar.queryByRole('button', { name: /^New topic/  })).toBeInTheDocument()
     expect(sidebar.queryByText('New topic', { selector: '.name' })).not.toBeInTheDocument()
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'slides.pdf' })).toBeInTheDocument()
   })
 
-  it('folds the sidebar away when the content is pressed', async () => {
+  it('ends a peek when the content or the chat is pressed, but not the sidebar, and never a pinned one', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
-    await showTopics()
-    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     await fireEvent.pointerDown(screen.getByTestId('pdf-viewer'))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
-  })
+    expect(topicsSidebar().inert).toBe(false)
 
-  it('folds the sidebar away when the chat is pressed, but not when the sidebar itself is', async () => {
-    renderOffline()
-    await pick(pdf('slides.pdf'))
-    await screen.findByRole('tab', { name: 'slides.pdf' })
-    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide topics' }))
+    await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Show topics' }))
     await fireEvent.pointerDown(screen.getByRole('heading', { name: 'Topics' }))
-    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(false)
     await fireEvent.pointerDown(screen.getByRole('complementary', { name: 'Chat' }))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(true)
+    await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Show topics' }))
+    await fireEvent.pointerDown(screen.getByTestId('pdf-viewer'))
+    expect(topicsSidebar().inert).toBe(true)
   })
 
   it('keeps the sidebar open when a topic is clicked, so a discussion can be picked', async () => {
@@ -508,6 +516,65 @@ describe('App', () => {
     expect(sources.getByRole('button', { name: /^b\.pdf/ })).toBeInTheDocument()
     await fireEvent.click(sources.getByRole('button', { name: /^a\.pdf/ }))
     expect(await screen.findByRole('tab', { name: 'a.pdf', selected: true })).toBeInTheDocument()
+  })
+
+  it('shows a card with the name and kind when hovering a source', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
+    const sources = within(screen.getByRole('list', { name: 'Sources' }))
+    const row = (name: RegExp) => sources.getByRole('button', { name }).parentElement!
+    await fireEvent.pointerEnter(row(/^a\.pdf/))
+    // It waits a moment before appearing.
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    const card = await screen.findByRole('tooltip', {}, { timeout: 1000 })
+    expect(card).toHaveTextContent('a.pdf')
+    expect(card).toHaveTextContent(/Not indexed yet|Could not be indexed/)
+    // Moving straight to another source keeps the same card and changes what it shows.
+    await fireEvent.pointerLeave(row(/^a\.pdf/))
+    await fireEvent.pointerEnter(row(/^b\.pdf/))
+    expect(screen.getByRole('tooltip')).toBe(card)
+    expect(card).toHaveTextContent('b.pdf')
+    // Leaving the sources hides it shortly after.
+    await fireEvent.pointerLeave(row(/^b\.pdf/))
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
+  })
+
+  it('renames a source from its menu, tab included', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await screen.findByRole('tab', { name: 'a.pdf' })
+    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for a.pdf' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const box = screen.getByRole('textbox', { name: 'Source name' })
+    await fireEvent.input(box, { target: { value: 'Lecture notes' } })
+    await fireEvent.submit(box.closest('form')!)
+    expect(screen.getByRole('tab', { name: 'Lecture notes' })).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Sources' })).getByRole('button', { name: /^Lecture notes/ })).toBeInTheDocument()
+  })
+
+  it('shows the same card below a hovered tab, with the file details behind its icon', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    const tab = (await screen.findByRole('tab', { name: 'a.pdf' })).parentElement!
+    await fireEvent.pointerEnter(tab)
+    const card = await screen.findByRole('tooltip', {}, { timeout: 1000 })
+    expect(card).toHaveTextContent('a.pdf')
+    expect(within(card).getByRole('button', { name: 'File details' })).toBeInTheDocument()
+    expect(card).toHaveTextContent('File')
+    expect(card).toHaveTextContent('Uploaded')
+    // Moving onto the card keeps it.
+    await fireEvent.pointerLeave(tab)
+    await fireEvent.pointerEnter(card)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(screen.getByRole('tooltip')).toBe(card)
+    await fireEvent.pointerLeave(card)
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
   })
 
   it('opens the file picker from Upload source, and toggles the lists', async () => {
@@ -543,7 +610,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /^Actions for a/ })).toBeInTheDocument()
   })
 
-  it('reorders tabs by dragging one onto another', async () => {
+  it('reorders tabs by dragging one, the others sliding aside as it passes them', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))
     await pick(pdf('b.pdf', 'b'))
@@ -552,36 +619,41 @@ describe('App', () => {
     expect(tabs()).toEqual(['a.pdf', 'b.pdf'])
     const first = screen.getByRole('tab', { name: 'a.pdf' }).parentElement!
     const second = screen.getByRole('tab', { name: 'b.pdf' }).parentElement!
-    const data = new Map<string, string>()
-    const dragImages: Element[] = []
-    const dataTransfer = {
-      setData: (k: string, v: string) => data.set(k, v),
-      setDragImage: (el: Element) => dragImages.push(el),
-      types: [],
-      dropEffect: '',
-      effectAllowed: '',
+    // jsdom has no layout: two 100px tabs side by side.
+    for (const [el, left] of [[first, 0], [second, 100]] as const) {
+      Object.defineProperty(el, 'offsetLeft', { configurable: true, value: left })
+      Object.defineProperty(el, 'offsetWidth', { configurable: true, value: 100 })
     }
-    await fireEvent.dragStart(first, { dataTransfer })
-    // A card with the PDF's name is carried along, and a line shows where the tab will land.
-    expect(dragImages).toHaveLength(1)
-    expect(dragImages[0].textContent).toBe('a.pdf')
-    await fireEvent.dragOver(second, { dataTransfer, clientX: 10_000 })
-    expect(document.querySelector('.drop-line')).toBeInTheDocument()
-    // Once the drag has started, the PDF and chat stop taking the pointer, so nothing auto-scrolls.
-    await waitFor(() => expect(document.querySelector('.app')).toHaveClass('tab-dragging'))
-    await fireEvent.drop(second, { dataTransfer })
-    expect(tabs()).toEqual(['b.pdf', 'a.pdf'])
-    expect(document.querySelector('.drop-line')).not.toBeInTheDocument()
+    await fireEvent.pointerDown(first, { clientX: 50, button: 0 })
+    await fireEvent.pointerMove(window, { clientX: 130 })
+    // The dragged tab follows the pointer; the other slides aside once it is passed halfway.
+    expect(first.style.transform).toBe('translateX(80px)')
+    expect(second.style.transform).toBe('')
+    await fireEvent.pointerMove(window, { clientX: 400 })
+    expect(first.style.transform).toBe('translateX(100px)')
+    expect(second.style.transform).toBe('translateX(-100px)')
+    expect(document.querySelector('.app')).toHaveClass('tab-dragging')
+    await fireEvent.pointerUp(window, { clientX: 400 })
+    // The release doesn't click the tab under the pointer.
+    expect(screen.getByRole('tab', { name: 'b.pdf' })).toHaveAttribute('aria-selected', 'true')
+    await fireEvent.click(screen.getByRole('tab', { name: 'a.pdf' }))
+    expect(screen.getByRole('tab', { name: 'b.pdf' })).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(tabs()).toEqual(['b.pdf', 'a.pdf']))
     expect(document.querySelector('.app')).not.toHaveClass('tab-dragging')
+    expect(first.style.transform).toBe('')
   })
 
-  it('expands the sidebar when New topic is pressed while it is collapsed', async () => {
+  it('cancels a tab drag with Escape, leaving the order as it was', async () => {
     renderOffline()
-    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
-    await fireEvent.click(sidebar.getByRole('button', { name: 'Hide topics' }))
-    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
-    expect(sidebar.getByLabelText('Topic name')).toBeInTheDocument()
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    const first = screen.getByRole('tab', { name: 'a.pdf' }).parentElement!
+    await fireEvent.pointerDown(first, { clientX: 50, button: 0 })
+    await fireEvent.pointerMove(window, { clientX: 130 })
+    await fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('.app')).not.toHaveClass('tab-dragging'))
+    expect(screen.getAllByRole('tab').map((t) => t.textContent?.trim())).toEqual(['a.pdf', 'b.pdf'])
   })
 
   it('has no Open PDF button, and shows the open tab\'s controls in the tab row', async () => {
@@ -826,7 +898,7 @@ describe('App', () => {
     expect(within(panel).getByLabelText('Ask a question')).toHaveAttribute('placeholder', 'Ask about p. 3…')
   })
 
-  it('opens a menu on a right-click on the page, whose Socratic and Quiz me attach the spot and wait for a focus', async () => {
+  it('opens a menu on a right-click on the page, whose Socratic and Quiz me attach the spot', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
@@ -858,7 +930,9 @@ describe('App', () => {
 
     await fireEvent.contextMenu(page, { clientX: 220, clientY: 160 })
     await fireEvent.click(screen.getByRole('menuitem', { name: /^Quiz me/ }))
-    expect(within(panel).getByRole('button', { name: 'Mode: Quiz' })).toBeInTheDocument()
+    // Quiz me asks in Normal mode, with what to ask for in the box.
+    expect(within(panel).getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Ask a question')).toHaveValue('Quiz me on this')
     expect(within(panel).getByLabelText('Attached to your question')).toBeInTheDocument()
 
     // A left click with Click to ask attaches the spot and switches back to normal answers.
@@ -1011,10 +1085,12 @@ describe('App', () => {
   it('opens the chat from New discussion under the open topic in the sidebar', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
     await showTopics()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
     await fireEvent.click(sidebar.getByRole('button', { name: 'New discussion' }))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    // The sidebar stays.
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Chat' })).toHaveClass('open')
     // New discussion is an action, never marked as the open discussion.
     await showTopics()
@@ -1040,7 +1116,7 @@ describe('App', () => {
     expect(panel.getByRole('button', { name: 'Close chat' })).toHaveClass('icon-button')
     // The title is the open discussion's, which opens the topic's list of discussions.
     // With nothing to switch to, it is just the title, without the arrow.
-    expect(panel.getByRole('heading', { name: 'New chat' })).toHaveAttribute('title', 'New chat · slides')
+    expect(panel.getByRole('heading', { name: 'New chat' })).toBeInTheDocument()
     expect(panel.queryByRole('button', { name: /^Discussion:/ })).not.toBeInTheDocument()
     expect(panel.queryByRole('heading', { name: 'Chat' })).not.toBeInTheDocument()
     expect(panel.getByRole('button', { name: 'New chat' })).toHaveTextContent('New chat')

@@ -9,9 +9,9 @@
   --danger: #cf222e;
   /* Marks a Socratic session in the chat. */
   --socratic: #8250df;
-  /* Marks quizzes in the chat. */
-  --quiz: #0f7b6c;
+  /* Quiz marks: right, and partly right. Quiz and hint cards are otherwise neutral, so colour in the chat marks a mode (Socratic). */
   --right: #1a7f37;
+  --partly: #9a6700;
   --viewer-bg: #e8eaed;
   --sidebar-strip: 3rem;
   --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.22);
@@ -42,8 +42,8 @@
   --accent: #4493f8;
   --danger: #ff7b72;
   --socratic: #ab7df8;
-  --quiz: #3fb8a5;
   --right: #3fb950;
+  --partly: #d29922;
   --viewer-bg: #2b2f36;
   --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.55);
   --sidebar-bg: #161b22;
@@ -65,8 +65,8 @@
     --accent: #4493f8;
     --danger: #ff7b72;
     --socratic: #ab7df8;
-    --quiz: #3fb8a5;
     --right: #3fb950;
+    --partly: #d29922;
     --viewer-bg: #2b2f36;
     --sidebar-shadow: 6px 0 28px rgb(0 0 0 / 0.55);
     --sidebar-bg: #161b22;

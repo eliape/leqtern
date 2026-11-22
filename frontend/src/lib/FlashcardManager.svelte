@@ -223,7 +223,7 @@
               <div class="meta">
                 <span>{typeName(c.type)}</span>
                 {#if label}
-                  <button type="button" class="link" title="Show this page" onclick={() => reveal(c)}>{label}</button>
+                  <button type="button" class="link" onclick={() => reveal(c)}>{label}</button>
                 {/if}
                 {#if note}<span class="status">{note}</span>{/if}
                 <span class="spacer"></span>

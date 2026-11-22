@@ -25,6 +25,12 @@ describe('renderMarkdown', () => {
     expect(div.textContent).not.toContain('$')
   })
 
+  it('lets long inline maths wrap and gives display maths written in a sentence its own block', () => {
+    expect(renderMarkdown('so $n - 1$ is')).not.toContain('math-long')
+    expect(renderMarkdown('so $V \\cdot W = V^0 W^0 - \\vec v \\cdot \\vec w \\ge 0$ holds')).toContain('class="math-long"')
+    expect(renderMarkdown('so $$x^2$$ holds')).toContain('class="math-display"')
+  })
+
   it('leaves prices and maths inside code alone', () => {
     expect(html('It costs $5 and $10.').textContent?.trim()).toBe('It costs $5 and $10.')
     expect(html('Use `$x$` to write maths.').querySelector('code')).toHaveTextContent('$x$')

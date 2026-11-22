@@ -33,8 +33,18 @@ const inlineMath: TokenizerAndRendererExtension = {
       /^\$(?!\s)((?:\\\$|[^$\n])+?)(?<!\s)\$(?!\d)/.exec(src)
     if (match) return { type: 'inlineMath', raw: match[0], text: match[1].trim(), display: match[0].startsWith('$$') }
   },
-  renderer: (token) => tex(token.text, token.display),
+  // Short maths like "n − 1" stays on one line; a long formula may break after a relation or
+  // operator, so it can't push the answer wider than the chat.
+  renderer: (token) =>
+    token.display
+      ? `<span class="math-display">${tex(token.text, true)}</span>`
+      : token.text.length > LONG_INLINE
+        ? `<span class="math-long">${tex(token.text, false)}</span>`
+        : tex(token.text, false),
 }
+
+/** Inline maths longer than this many characters of LaTeX may wrap. */
+const LONG_INLINE = 24
 
 // Links open in a new tab: following one in place would leave the app and lose the open PDFs.
 // Nothing in an answer may load from elsewhere: text in a PDF could get the model to write an

@@ -51,7 +51,6 @@
             type="button"
             class="level-{entry.level}"
             aria-current={i === current}
-            title={entry.title}
             onclick={() => ongo(entry)}>{entry.title}</button
           >
         </li>

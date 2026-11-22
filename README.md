@@ -41,13 +41,19 @@ The frontend dev server forwards `/api/*` to the backend, so open http://localho
 
 ### Reindexing
 
-To index PDFs again (for example after the indexing prompt changes), delete only the index files, then restart `make dev` and reload the page. Open tabs queue their PDFs for indexing again.
+To index PDFs again (for example after the indexing prompt changes), stop `make dev` and run:
 
 ```sh
-rm backend/data/docs/*/index.json
+make reindex                      # every document in an active topic
+make reindex ARGS="calculus"      # documents whose name or id contains "calculus"
+make reindex ARGS="--list"        # documents, whether they're archived, and their index state
+make reindex ARGS="--missing"     # only documents without a finished index
+make reindex ARGS="--all"         # also documents only in archived topics, or in no topic
 ```
 
-Don't delete the folders in `backend/data/docs/`: they also hold the PDFs your saved tabs open from.
+It shows progress and cost per document. A document whose rebuild fails or is interrupted keeps its old index. Start `make dev` again and reload the page afterwards.
+
+Only `index.json` files are replaced. Don't delete the folders in `backend/data/docs/`: they also hold the PDFs your saved tabs open from.
 
 ### Flashcards
 

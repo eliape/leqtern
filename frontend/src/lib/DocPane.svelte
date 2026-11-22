@@ -30,6 +30,8 @@
     /** Whether the chat is open, and whether the zoom follows it (see PdfViewer). */
     chatOpen?: boolean
     followChat?: boolean
+    /** Whether the pinned topics sidebar takes room beside the PDF (see PdfViewer). */
+    sidebarPinned?: boolean
     /** What a left click on the PDF does (see PdfViewer). The controls switch it for every tab. */
     tool?: Tool
     ontoolchange?: (tool: Tool) => void
@@ -52,6 +54,7 @@
     reserve,
     chatOpen,
     followChat,
+    sidebarPinned,
     tool,
     ontoolchange,
     onpick,
@@ -216,6 +219,7 @@
     {reserve}
     {chatOpen}
     {followChat}
+    {sidebarPinned}
     {tool}
     {onpick}
     {oncontextpick}

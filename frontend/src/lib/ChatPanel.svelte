@@ -10,8 +10,10 @@
   import { MODES } from './modes'
   import ChatSwitcher from './ChatSwitcher.svelte'
   import QuizCard from './QuizCard.svelte'
+  import HintDeck from './HintDeck.svelte'
   import { streamFade } from './streamFade'
-  import { type Chat, chatOf, chatTitle, type Topic, type Workspace } from './workspace.svelte'
+  import { ongoing, stepLabel } from './steps'
+  import { type Chat, type ChatMessage, chatOf, chatTitle, type Topic, type Workspace } from './workspace.svelte'
 
   type Props = {
     workspace: Workspace
@@ -131,6 +133,12 @@
     return !!(context.point || context.selection)
   }
 
+  /** Whether an answer's newest step is still running ("Writing a quiz…"), which then says it is busy. */
+  function stepRunning(message: ChatMessage) {
+    const last = message.steps?.at(-1)
+    return message.status === 'streaming' && last !== undefined && ongoing(last)
+  }
+
   /** The chip's name, with the PDF's name when the topic has several. */
   function chipName(context: PageContext) {
     const several = (topic?.docIds.length ?? 0) > 1
@@ -138,12 +146,11 @@
   }
 
   /**
-   * What the question box asks for. A quiz, or a Socratic session about the attached spot,
-   * starts with what to focus on, which is optional; once the model has asked a Socratic
-   * question, the box takes the reader's answer.
+   * What the question box asks for. A Socratic session about the attached spot starts with
+   * what to focus on, which is optional; once the model has asked a Socratic question, the
+   * box takes the reader's answer.
    */
   function placeholder(t: Topic, c: Chat) {
-    if (c.mode === 'quiz') return 'What should the quiz cover? (optional)'
     if (c.mode === 'socratic' && t.context) return 'What should it focus on? (optional)'
     if (c.mode === 'socratic' && c.messages.at(-1)?.mode === 'socratic') return 'Answer, or ask for a hint…'
     return t.context ? `Ask about ${contextLabel(t.context)}…` : 'Ask a question…'
@@ -153,11 +160,6 @@
   function startsSession(c: Chat, index: number) {
     const before = c.messages.findLast((m, i) => i < index && m.role === 'user')
     return c.messages[index].mode === 'socratic' && before?.mode !== 'socratic'
-  }
-
-  function chipTitle(context: PageContext) {
-    const what = context.selection ? 'Selected text' : context.point ? 'Clicked spot' : 'Page'
-    return `${what} on ${contextLabel(context)} of ${context.docName}. Click to show it.`
   }
 
   // Follow the newest message, also while an answer streams in, but only while the reader is at
@@ -342,7 +344,6 @@
     aria-valuenow={width}
     aria-valuemin={MIN_WIDTH}
     tabindex="0"
-    title="Drag to resize. Double-click to reset."
     onpointerdown={startResize}
     ondblclick={() => setWidth(DEFAULT_WIDTH)}
     onkeydown={onHandleKeydown}
@@ -355,7 +356,6 @@
         <button
           type="button"
           class="new-chat"
-          title="Start a new discussion in this topic"
           disabled={!chat?.messages.length}
           onclick={() => {
             if (!topic) return
@@ -380,7 +380,7 @@
           <div
             class="message {message.role}"
             class:socratic={message.role === 'assistant' && message.mode === 'socratic'}
-            class:quiz={message.role === 'assistant' && message.mode === 'quiz'}
+            class:quiz={message.role === 'assistant' && (message.mode === 'quiz' || !!message.quiz)}
             class:error={message.status === 'error'}
             class:waiting={message.status === 'streaming' && !message.text}
           >
@@ -390,12 +390,11 @@
             {:else if message.role === 'user' && startsSession(chat, index)}
               <span class="session-start">Socratic session</span>
             {/if}
-            {#if message.quote}<blockquote class="quoted" title={message.quote}>{message.quote}</blockquote>{/if}
+            {#if message.quote}<blockquote class="quoted">{message.quote}</blockquote>{/if}
             {#if message.context && pointedAt(message.context)}
               <button
                 type="button"
                 class="chip small"
-                title={chipTitle(message.context)}
                 onclick={() => onreveal?.(message.context!)}
               >
                 {#if message.context.thumbnail}<img src={message.context.thumbnail} alt="" />{/if}
@@ -406,7 +405,7 @@
               <!-- The API's summary of the model's thinking, folded away; it never sends the thinking itself. -->
               {@const live = message.status === 'streaming' && !message.text}
               <details class="thought">
-                <summary title="Show a summary of what the model thought about">
+                <summary>
                   <span class:thinking={live}>{live ? 'Thinking…' : thoughtFor(message.thinkingSeconds)}</span>
                   <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
                 </summary>
@@ -415,28 +414,45 @@
             {/if}
             {#if message.steps?.length}
               <ul class="steps" aria-label="Looked up">
-                {#each message.steps as step, i (i)}<li>{step}</li>{/each}
+                {#each message.steps as step, i (i)}
+                  {@const running = message.status === 'streaming' && i === message.steps.length - 1}
+                  <li><span class:thinking={running && ongoing(step)}>{stepLabel(step, running)}</span></li>
+                {/each}
               </ul>
             {/if}
-            {#if message.status === 'streaming' && !message.text && !message.thinking}
+            {#if message.status === 'streaming' && !message.text && !message.thinking && !stepRunning(message)}
               <span class="thinking">{message.mode === 'quiz' ? 'Writing a quiz…' : 'Thinking…'}</span>
             {:else if message.status === 'streaming' && !message.text}
               <!-- Still thinking: the row above says so. -->
-            {:else if message.quiz}
+            {:else if message.role === 'assistant'}
+              {#if message.text || !message.quiz}
+                <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
+                <!-- New words fade in as they stream. -->
+                <div
+                  class="text markdown"
+                  use:streamFade={{ html: renderMarkdown(message.text, citable(index)), live: message.status === 'streaming' }}
+                ></div>
+              {/if}
+            {:else if message.text}
+              <span class="text">{message.text}</span>
+            {/if}
+            {#if message.quiz}
               <QuizCard
                 quiz={message.quiz}
                 docs={citable(index)}
                 onpick={(question, choice) => workspace.answerQuiz(topic.id, message.id, question, choice)}
+                ontype={(question, text) => workspace.typeQuiz(topic.id, message.id, question, text)}
+                onhint={(question) => workspace.showQuizHint(topic.id, message.id, question)}
+                onopen={(question) => (message.openCard = question)}
               />
-            {:else if message.role === 'assistant'}
-              <!-- Answers are Markdown with LaTeX maths; renderMarkdown sanitizes the HTML. -->
-              <!-- New words fade in as they stream. -->
-              <div
-                class="text markdown"
-                use:streamFade={{ html: renderMarkdown(message.text, citable(index)), live: message.status === 'streaming' }}
-              ></div>
-            {:else if message.text}
-              <span class="text">{message.text}</span>
+            {/if}
+            {#if message.hints?.items.length}
+              <HintDeck
+                hints={message.hints}
+                docs={citable(index)}
+                onreveal={() => workspace.revealHint(topic.id, message.id)}
+                onopen={(card) => (message.openCard = card)}
+              />
             {/if}
           </div>
           {#if message.role === 'assistant' && message.status === 'error' && index === chat.messages.length - 1}
@@ -482,7 +498,7 @@
               <span>
                 From
                 {#if original}
-                  <button type="button" class="link" title={`Open ${chatTitle(original)}`} onclick={() => openChat(original.id)}
+                  <button type="button" class="link" onclick={() => openChat(original.id)}
                     >{chatTitle(original)}</button
                   >
                 {:else}
@@ -523,11 +539,11 @@
         </p>
       {/if}
 
-      <form class="composer" class:socratic={chat.mode === 'socratic'} class:quiz={chat.mode === 'quiz'} onsubmit={send}>
+      <form class="composer" class:socratic={chat.mode === 'socratic'} onsubmit={send}>
         {#if topic.context}
           {@const context = topic.context}
           <div class="attached" aria-label="Attached to your question">
-            <button type="button" class="chip" title={chipTitle(context)} onclick={() => onreveal?.(context)}>
+            <button type="button" class="chip" onclick={() => onreveal?.(context)}>
               {#if context.thumbnail}<img src={context.thumbnail} alt="" />{/if}
               <span>{chipName(context)}</span>
               {#if context.selection}<span class="quote">“{context.selection}”</span>{/if}
@@ -536,19 +552,17 @@
               type="button"
               class="remove"
               aria-label="Remove from your question"
-              title="Remove (Esc)"
               onclick={() => workspace.clearContext(topic.id)}>×</button
             >
           </div>
         {/if}
         {#if topic.quote}
           <div class="attached" aria-label="Replying to">
-            <blockquote class="quoted" title={topic.quote}>{topic.quote}</blockquote>
+            <blockquote class="quoted">{topic.quote}</blockquote>
             <button
               type="button"
               class="remove"
               aria-label="Remove the quote"
-              title="Remove (Esc)"
               onclick={() => workspace.clearQuote(topic.id)}>×</button
             >
           </div>
@@ -569,7 +583,6 @@
                 type="button"
                 class="send stop"
                 aria-label="Stop answering"
-                title="Stop answering"
                 onclick={() => {
                   workspace.stop(topic.id)
                   composer?.focus()
@@ -582,7 +595,6 @@
                 type="submit"
                 class="send"
                 aria-label="Send"
-                title="Send (Enter)"
                 disabled={!workspace.canSend(topic.id)}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>
@@ -757,6 +769,8 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    /* Nothing in an answer may make the whole log scroll sideways; wide maths scrolls in its own block. */
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     gap: var(--message-gap);
@@ -859,6 +873,13 @@
     font-size: 1.1em;
     white-space: nowrap;
   }
+  .markdown :global(.math-long .katex) {
+    white-space: normal;
+  }
+  /* $$…$$ written inside a sentence is a display formula too, so it scrolls the same way. */
+  .markdown :global(span.math-display) {
+    display: block;
+  }
 
   .message.user {
     align-self: flex-end;
@@ -872,14 +893,9 @@
   }
 
   /* With no box, a Socratic answer is marked by a coloured line down its left, matching the question box's shade in that mode. */
-  .message.socratic,
-  .message.quiz {
+  .message.socratic {
     padding-left: 0.75rem;
     box-shadow: inset 2px 0 0 var(--socratic);
-  }
-  /* A quiz's line has the quiz colour. */
-  .message.quiz {
-    box-shadow: inset 2px 0 0 var(--quiz);
   }
   /* A session or a quiz may start with nothing typed, so its message says what it is. */
   .session-start {
@@ -1260,13 +1276,6 @@
   .composer.socratic:focus-within {
     border-color: var(--socratic);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--socratic) 22%, transparent);
-  }
-  .composer.quiz {
-    border-color: color-mix(in srgb, var(--quiz) 45%, var(--border));
-  }
-  .composer.quiz:focus-within {
-    border-color: var(--quiz);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--quiz) 22%, transparent);
   }
 
   .input {

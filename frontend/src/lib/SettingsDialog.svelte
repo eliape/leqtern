@@ -1,5 +1,6 @@
 <script lang="ts">
   import { saveZoomFollowsChat } from './chatZoom'
+  import { quizMask, quizTyped, setHideQuizChoices, setTypedQuizShare } from './quizMask.svelte'
   import { applyTheme, savedTheme, THEMES, type Theme } from './theme'
   import type { Workspace } from './workspace.svelte'
 
@@ -61,6 +62,19 @@
     </label>
 
     <div class="field">
+      <span class="label" id="names-label">Source names</span>
+      <span class="hint">
+        {workspace.indexTitles
+          ? 'Sources go by the title found when they were indexed, until you rename them.'
+          : 'Sources go by their file name, until you rename them.'}
+      </span>
+      <div class="segments" role="radiogroup" aria-labelledby="names-label">
+        <button type="button" role="radio" aria-checked={workspace.indexTitles} onclick={() => workspace.setIndexTitles(true)}>Title from the index</button>
+        <button type="button" role="radio" aria-checked={!workspace.indexTitles} onclick={() => workspace.setIndexTitles(false)}>File name</button>
+      </div>
+    </div>
+
+    <div class="field">
       <span class="label" id="theme-label">Theme</span>
       <div class="segments" role="radiogroup" aria-labelledby="theme-label">
         {#each THEMES as t (t.id)}
@@ -80,6 +94,37 @@
         <button type="button" role="radio" aria-checked={zoomFollowsChat} onclick={() => pickZoom(true)}>Fit to chat</button>
         <button type="button" role="radio" aria-checked={!zoomFollowsChat} onclick={() => pickZoom(false)}>Fixed size</button>
       </div>
+    </div>
+
+    <div class="field">
+      <span class="label" id="quiz-mask-label">Quiz choices</span>
+      <span class="hint">
+        {quizMask.hideChoices
+          ? 'Each question’s choices stay covered until you click them, so you think of an answer first.'
+          : 'Each question shows its choices right away.'}
+      </span>
+      <div class="segments" role="radiogroup" aria-labelledby="quiz-mask-label">
+        <button type="button" role="radio" aria-checked={quizMask.hideChoices} onclick={() => setHideQuizChoices(true)}>Hidden until clicked</button>
+        <button type="button" role="radio" aria-checked={!quizMask.hideChoices} onclick={() => setHideQuizChoices(false)}>Shown</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="label" for="typed-share">Typed answers in quizzes</label>
+      <div class="slider">
+        <input
+          id="typed-share"
+          type="range"
+          min="0"
+          max="100"
+          step="10"
+          value={Math.round(quizTyped.share * 100)}
+          aria-valuetext={`At most ${Math.round(quizTyped.share * 100)}%`}
+          oninput={(e) => setTypedQuizShare(Number(e.currentTarget.value) / 100)}
+        />
+        <span class="value">{quizTyped.share ? `Up to ${Math.round(quizTyped.share * 100)}%` : 'None'}</span>
+      </div>
+      <span class="hint">Research shows that typing short answers yourself helps you remember more than picking from choices.</span>
     </div>
   </div>
 </div>
@@ -181,5 +226,19 @@
   .segments button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
+  }
+  .slider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .slider input {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .slider .value {
+    min-width: 5.5rem;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
   }
 </style>

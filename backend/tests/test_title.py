@@ -29,6 +29,7 @@ def test_a_discussion_is_named_by_haiku_from_its_first_question(client: TestClie
         '"Calculus"' in prompt
         and "p. 3 of a.pdf" in prompt
         and "They ask: Why does the chain rule work?" in prompt
+        and "leave out the topic's name" in prompt
     )
 
     # A quiz with nothing to focus on is named from where they were.

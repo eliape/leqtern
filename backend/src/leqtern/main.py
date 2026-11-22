@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from . import deck as decks
 from .anki import package
-from .ask import AskRequest, Turn, describe, stream_answer, write_quiz
+from .ask import AskRequest, Turn, describe, stream_answer
 from .config import Settings, get_settings
 from .deck import CardDraft, Decks
 from .dedup import SentenceEmbedder
@@ -23,7 +23,7 @@ from .flashcards import FlashcardRequest, make_flashcards, sync_vectors
 from .flashcards import Services as FlashcardServices
 from .index import Indexer
 from .library import Library
-from .quiz import QuizRecord, reading_so_far, recommend
+from .quiz import QuizRecord, review
 from .register import (
     TIDY_AFTER,
     DiscussionRequest,
@@ -125,6 +125,16 @@ def get_services() -> Services:
 ServicesDep = Annotated[Services, Depends(get_services)]
 
 
+def file_details(services: Services, doc_id: str) -> dict[str, Any]:
+    """The name the PDF was first uploaded under, and when (its file's time, in Unix seconds)."""
+    doc = services.library.get(doc_id)
+    source = services.library.folder(doc_id) / "source.pdf"
+    details: dict[str, Any] = {"file_name": doc.name} if doc else {}
+    if source.is_file():
+        details["uploaded"] = source.stat().st_mtime
+    return details
+
+
 @app.post("/api/docs")
 async def add_doc(request: Request, services: ServicesDep, name: str = Query("document.pdf")):
     """Store a PDF (sent as the request body) and start indexing it in the background."""
@@ -140,7 +150,7 @@ async def add_doc(request: Request, services: ServicesDep, name: str = Query("do
         logger.exception("Could not read %s", name)
         raise HTTPException(status_code=422, detail="Could not read this PDF.") from error
     services.indexer.enqueue(doc.id)
-    return {"id": doc.id, **services.indexer.doc_status(doc.id)}
+    return {"id": doc.id, **services.indexer.doc_status(doc.id), **file_details(services, doc.id)}
 
 
 @app.get("/api/docs/{doc_id}")
@@ -148,7 +158,7 @@ async def doc_status(doc_id: str, services: ServicesDep) -> dict[str, Any]:
     if services.library.get(doc_id) is None:
         raise HTTPException(status_code=404, detail="No such document.")
     services.indexer.resume(doc_id)
-    return {"id": doc_id, **services.indexer.doc_status(doc_id)}
+    return {"id": doc_id, **services.indexer.doc_status(doc_id), **file_details(services, doc_id)}
 
 
 @app.post("/api/docs/{doc_id}/index")
@@ -157,7 +167,7 @@ async def retry_index(doc_id: str, services: ServicesDep) -> dict[str, Any]:
     if services.library.get(doc_id) is None:
         raise HTTPException(status_code=404, detail="No such document.")
     services.indexer.retry(doc_id)
-    return {"id": doc_id, **services.indexer.doc_status(doc_id)}
+    return {"id": doc_id, **services.indexer.doc_status(doc_id), **file_details(services, doc_id)}
 
 
 @app.get("/api/docs/{doc_id}/pdf")
@@ -323,44 +333,6 @@ def ask(
     return StreamingResponse(events(client, request, services), media_type="application/x-ndjson")
 
 
-@app.post("/api/quiz")
-async def quiz(
-    request: AskRequest,
-    client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
-    services: ServicesDep,
-) -> dict[str, Any]:
-    """
-    A multiple-choice quiz for the newest turn, which asks for one. Without anything to focus
-    on, it covers the section being read, up to where the reader is.
-    """
-    last = request.messages[-1] if request.messages else None
-    if not last or last.mode != "quiz":
-        raise HTTPException(status_code=422, detail="The last message must ask for a quiz.")
-    try:
-        reading = []
-        if not last.text.strip() and last.context and last.context.doc_id:
-            doc_id = last.context.doc_id
-            ids = request.docs if doc_id in request.docs else [*request.docs, doc_id]
-            toolbox = Toolbox(
-                services.library,
-                topic_docs(services.library, services.indexer, ids, request.doc_names),
-            )
-            reading = await reading_so_far(toolbox, doc_id, last.context.page)
-        notes = await register_notes(request, services)
-        written = await write_quiz(
-            client,
-            request,
-            services.usage,
-            request.model or services.answer_model,
-            reading,
-            notes=notes,
-        )
-    except Exception as error:
-        logger.exception("Quiz failed")
-        raise HTTPException(status_code=502, detail=error_message(error)) from error
-    return written.model_dump()
-
-
 class RecommendRequest(BaseModel):
     topic: str
     about: Turn
@@ -372,20 +344,22 @@ async def quiz_recommendation(
     request: RecommendRequest,
     client: Annotated[anthropic.AsyncAnthropic, Depends(get_client)],
     services: ServicesDep,
-) -> dict[str, str | None]:
-    """What to review after a quiz, or no text when every answer was right."""
+) -> dict[str, Any]:
+    """
+    After a quiz: grades for its typed answers (by question, null for the rest) and what to
+    review, or no text when every answer was right.
+    """
     about = request.about
     asked = describe(about.context) if about.context else ""
     if about.text.strip():
-        asked += f" They asked the quiz to focus on: {about.text.strip()}"
-    elif about.context:
-        asked += " The quiz covered the section they were reading, up to there."
+        asked += f" They asked: {about.text.strip()}"
     try:
-        text = await recommend(client, request.topic, asked, request.quiz, services.usage)
+        result = await review(client, request.topic, asked, request.quiz, services.usage)
     except Exception as error:
         logger.exception("Recommendation failed")
         raise HTTPException(status_code=502, detail=error_message(error)) from error
-    return {"text": text}
+    grades = [g.model_dump() if g else None for g in result.grades]
+    return {"text": result.recommendation, "grades": grades}
 
 
 class TitleRequest(BaseModel):

@@ -1,16 +1,20 @@
+import { firstOpen, isAnswered, isTyped, rightCount, typedText, ungraded } from './quiz'
+import { DEFAULT_TYPED_SHARE, quizTyped } from './quizMask.svelte'
 import {
   type AnswerStream,
   type AskRequest,
   type AskTurn,
-  createQuiz,
   type DiscussionRequest,
   fetchAnswer,
   fetchChatTitle,
   fetchIndexStatus,
   fetchPdf,
   fetchRecommendation,
+  type QuizReview,
   forgetRegister,
   type IndexStatus,
+  type Hints,
+  type OpenCard,
   noteDiscussion,
   type QuizRecord,
   type RecommendationRequest,
@@ -26,7 +30,8 @@ import { type FlashcardRequest, forgetDeck } from './flashcards'
  * A PDF opened in a topic. Each one is a tab. `data` is the PDF itself. A tab brought back from the saved workspace gets it from the backend
  * once it is shown (see loadPdf), so until then it has none.
  */
-export type Doc = { id: string; name: string; data?: Uint8Array }
+/** `renamed` once the user has named it: that name then also replaces the index's title on the sidebar's card. */
+export type Doc = { id: string; name: string; data?: Uint8Array; renamed?: boolean }
 
 /**
  * A quiz in the chat, with the reader's pick for each question (null until answered) and,
@@ -59,6 +64,12 @@ export type ChatMessage = {
   thinkingSeconds?: number
   /** On the model's side: the quiz it wrote, which the reader clicks through. */
   quiz?: Quiz
+  /** On the model's side: hints for an exercise, which the reader turns over one at a time. */
+  hints?: Hints
+  /** On the model's side: which quiz question or hint card is on show. Not saved. */
+  openCard?: number
+  /** On the reader's side: the quiz question or hint they had open when they asked. */
+  open?: OpenCard
 }
 
 /**
@@ -71,6 +82,12 @@ export type IndexState = {
   pagesDone: number
   pageCount: number
   error?: string
+  /** The document's title and kind (lecture notes, exam, …), from its index once it is ready. */
+  title?: string
+  kind?: string
+  /** The name the PDF was first uploaded under, and when (Unix seconds), from the backend. */
+  fileName?: string
+  uploaded?: number
 }
 
 /** The backend calls indexing uses. Tests pass fakes. */
@@ -86,13 +103,15 @@ const realIndexApi: IndexApi = {
   retry: (id) => retryIndex(id),
 }
 
-/** The backend calls quizzes use. Tests pass fakes. */
+/** Where notes on what to review after a quiz come from. Tests pass fakes. */
 export type QuizApi = {
-  create: (request: AskRequest, signal?: AbortSignal) => Promise<WrittenQuiz>
-  recommend: (request: RecommendationRequest) => Promise<string | null>
+  recommend: (request: RecommendationRequest) => Promise<QuizReview>
 }
 
-const realQuizApi: QuizApi = { create: (r, signal) => createQuiz(r, signal), recommend: (r) => fetchRecommendation(r) }
+/** What Quiz me in the right-click menu puts in the question box. */
+export const QUIZ_ME = 'Quiz me on this'
+
+const realQuizApi: QuizApi = { recommend: (r) => fetchRecommendation(r) }
 
 /**
  * The backend calls the topics' registers use: `note` has Haiku note what is new in a discussion
@@ -114,11 +133,11 @@ export type FlashcardSource =
   | { kind: 'chat'; chatId: string; messageId: string }
 
 /**
- * How a topic's chat answers: `normal` answers questions; `socratic` has the model
- * ask the reader questions that lead them to the answer instead of explaining;
- * `quiz` has it write a multiple-choice quiz to click through.
+ * How a topic's chat answers: `normal` answers questions (and writes a quiz or hints when
+ * asked); `socratic` has the model ask the reader questions that lead them to the answer
+ * instead of explaining.
  */
-export type Mode = 'normal' | 'socratic' | 'quiz'
+export type Mode = 'normal' | 'socratic'
 
 /**
  * One discussion in a topic: its messages and how it answers (`mode`, picked in the chat or
@@ -176,6 +195,7 @@ export type Topic = {
 export type SavedDoc = {
   id: string
   name: string
+  renamed?: boolean
   serverId: string
   page?: number
   /** The zoom the reader chose (1 is 100%), if they zoomed by hand. */
@@ -231,6 +251,15 @@ export function discussions(topic: Topic): Chat[] {
 }
 
 /** What a discussion is called: Haiku's title, or until it comes, the start of its first question. */
+const INDEX_TITLES_KEY = 'leqtern.indexTitles'
+function savedIndexTitles(): boolean {
+  try {
+    return localStorage.getItem(INDEX_TITLES_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
 export function chatTitle(chat: Chat): string {
   if (chat.title) return chat.title
   const first = chat.messages.find((m) => m.role === 'user')
@@ -257,6 +286,8 @@ export class Workspace {
   answerEffort = $state<string>()
   /** The reader's own instructions, sent with every question (set in Settings). */
   instructions = $state('')
+  /** Whether sources go by the title their index found (a setting); otherwise by their file name. */
+  indexTitles = $state(savedIndexTitles())
   /** Indexing progress per PDF (by tab id). */
   indexing = $state<Record<string, IndexState>>({})
   /** The page each tab was last on, so it opens there next time. */
@@ -313,6 +344,39 @@ export class Workspace {
   renameTopic(id: string, name: string) {
     const topic = this.topics.find((t) => t.id === id)
     if (topic && name.trim()) topic.name = name.trim()
+  }
+
+  /** Give a discussion a name of its own. Haiku no longer names it after that. */
+  renameChat(topicId: string, chatId: string, name: string) {
+    const chat = this.topics.find((t) => t.id === topicId)?.chats.find((c) => c.id === chatId)
+    if (chat && name.trim()) chat.title = name.trim()
+  }
+
+  /**
+   * What a source is called in the sidebar, on its tab and on its card: a name given by hand,
+   * else (with the setting on) the title its index found, else its file name. The model and
+   * citations go by `name`, the file name or the name given by hand.
+   */
+  docName(id: string): string {
+    const doc = this.docs[id]
+    if (!doc) return ''
+    if (doc.renamed || !this.indexTitles) return doc.name
+    return this.indexing[id]?.title || doc.name
+  }
+
+  setIndexTitles(on: boolean) {
+    this.indexTitles = on
+    try {
+      localStorage.setItem(INDEX_TITLES_KEY, on ? '1' : '0')
+    } catch {
+      // Not remembered, then.
+    }
+  }
+
+  /** Rename a source: the sidebar, its tab and the model all go by the new name. */
+  renameDoc(id: string, name: string) {
+    const doc = this.docs[id]
+    if (doc && name.trim()) this.docs = { ...this.docs, [id]: { ...doc, name: name.trim(), renamed: true } }
   }
 
   /** Put a topic away in the Archive. If it was open, the next topic that is not archived is. */
@@ -393,7 +457,17 @@ export class Workspace {
     if (!known) this.indexing[docId] = { status: 'uploading', pagesDone: 0, pageCount: 0 }
     const update = (s: IndexStatus) => {
       if (!(docId in this.docs)) return false
-      this.indexing[docId] = { serverId: s.id, status: s.status, pagesDone: s.pages_done, pageCount: s.page_count, error: s.error }
+      this.indexing[docId] = {
+        serverId: s.id,
+        status: s.status,
+        pagesDone: s.pages_done,
+        pageCount: s.page_count,
+        error: s.error,
+        title: s.title || undefined,
+        kind: s.kind || undefined,
+        fileName: s.file_name || undefined,
+        uploaded: s.uploaded,
+      }
       return s.status !== 'ready' && s.status !== 'error'
     }
     try {
@@ -497,6 +571,19 @@ export class Workspace {
     if (mode !== 'normal') this.newChat(topicId)
     topic.context = context
     chatOf(topic).mode = mode
+  }
+
+  /**
+   * Quiz me from the right-click menu: a new discussion in Normal mode with the spot attached
+   * and "Quiz me on this" in the box, ready to send or to say what to focus on.
+   */
+  quizOn(topicId: string, context: PageContext) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    if (!topic) return
+    this.newChat(topicId)
+    topic.context = context
+    chatOf(topic).mode = 'normal'
+    if (!topic.draft.trim()) topic.draft = QUIZ_ME
   }
 
   /** Replace the attached spot with the same spot and its images, once they are rendered. */
@@ -643,80 +730,89 @@ export class Workspace {
 
   /**
    * Whether the topic's draft can be sent now: not while an answer is arriving, and not
-   * blank, except to start a quiz, or a Socratic session about the attached spot, where
-   * what to focus on is optional.
+   * blank, except to start a Socratic session about the attached spot, where what to focus
+   * on is optional.
    */
   canSend(topicId: string): boolean {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || this.isAnswering(topicId)) return false
     const { mode } = chatOf(topic)
-    return !!topic.draft.trim() || mode === 'quiz' || (mode === 'socratic' && !!topic.context)
+    return !!topic.draft.trim() || (mode === 'socratic' && !!topic.context)
   }
 
   /**
    * Send the topic's draft as a question, with the attached context or, when
    * nothing is attached, whatever `fallback` gives (the open page), and stream
-   * the answer into the chat. In Socratic mode the model replies with questions;
-   * in Quiz mode it writes a quiz instead, about what the draft asks it to focus on, and the
-   * chat goes back to Normal. Ignored when the draft can't be sent (see canSend).
+   * the answer into the chat. In Socratic mode the model replies with questions. Ignored
+   * when the draft can't be sent (see canSend).
    */
   async ask(
     topicId: string,
     fallback?: () => Promise<PageContext | undefined>,
     stream: AnswerStream = fetchAnswer,
-    quizApi: QuizApi = this.quizApi,
   ): Promise<void> {
     const topic = this.topics.find((t) => t.id === topicId)
     if (!topic || !this.canSend(topicId)) return
     const { context, quote } = topic
     const chat = chatOf(topic)
     const mode = chat.mode !== 'normal' && { mode: chat.mode }
-    const question = { text: topic.draft.trim(), context, ...(quote && { quote }), ...mode }
+    const open = openCard(chat.messages)
+    const question = { text: topic.draft.trim(), context, ...(quote && { quote }), ...mode, ...(open && { open }) }
     topic.draft = ''
     topic.context = undefined
     topic.quote = undefined
-    const fill = context ? undefined : fallback
-    if (chat.mode === 'quiz') {
-      chat.mode = 'normal'
-      await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
-        const written = await quizApi.create(request, signal)
-        answer.quiz = { ...written, picked: written.questions.map(() => null) }
-      })
-    } else {
-      await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
-        // When the current stretch of thinking began; the model can think again after a lookup.
-        let thinkingSince: number | undefined
-        const stopThinking = () => {
-          if (thinkingSince === undefined) return
-          const seconds = (answer.thinkingSeconds ?? 0) + (Date.now() - thinkingSince) / 1000
-          answer.thinkingSeconds = Math.round(seconds * 10) / 10
-          thinkingSince = undefined
-        }
-        try {
-          for await (const event of stream(request, signal)) {
-            if (signal.aborted) break
-            if (event.type === 'thinking') {
-              if (thinkingSince === undefined) {
-                thinkingSince = Date.now()
-                if (answer.thinking) answer.thinking += '\n\n'
-              }
-              answer.thinking = (answer.thinking ?? '') + event.text
-              continue
+  const fill = context ? undefined : fallback
+    await this.converse(topic, chat, question, fill, async (answer, request, signal) => {
+      // When the current stretch of thinking began; the model can think again after a lookup.
+      let thinkingSince: number | undefined
+      const stopThinking = () => {
+        if (thinkingSince === undefined) return
+        const seconds = (answer.thinkingSeconds ?? 0) + (Date.now() - thinkingSince) / 1000
+        answer.thinkingSeconds = Math.round(seconds * 10) / 10
+        thinkingSince = undefined
+      }
+      try {
+        for await (const event of stream(request, signal)) {
+          if (signal.aborted) break
+          if (event.type === 'thinking') {
+            if (thinkingSince === undefined) {
+              thinkingSince = Date.now()
+              if (answer.thinking) answer.thinking += '\n\n'
             }
-            stopThinking()
-            if (event.type === 'text') answer.text += event.text
-            else answer.steps = [...(answer.steps ?? []), event.text]
+            answer.thinking = (answer.thinking ?? '') + event.text
+            continue
           }
-        } finally {
           stopThinking()
+          if (event.type === 'hints') answer.hints = { items: event.hints, revealed: 0 }
+          else if (event.type === 'quiz') answer.quiz = { ...event.quiz, picked: event.quiz.questions.map(() => null) }
+          else if (event.type === 'text') answer.text += event.text
+          else answer.steps = [...(answer.steps ?? []), event.text]
         }
-      })
-    }
+      } finally {
+        stopThinking()
+      }
+    })
+  }
+
+  /** Turn over the next of an answer's hint cards. */
+  revealHint(topicId: string, messageId: string): void {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const hints = topic?.chats.flatMap((c) => c.messages).find((m) => m.id === messageId)?.hints
+    if (hints && hints.revealed < hints.items.length) hints.revealed++
+  }
+
+  /** A quiz in one of a topic's discussions, with the discussion and the request for it. */
+  private quizAt(topicId: string, messageId: string) {
+    const topic = this.topics.find((t) => t.id === topicId)
+    const chat = topic?.chats.find((c) => c.messages.some((m) => m.id === messageId))
+    const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1
+    const quiz = chat?.messages[index]?.quiz
+    return topic && chat && quiz ? { topic, quiz, asked: chat.messages[index - 1] } : undefined
   }
 
   /**
-   * Record the reader's pick for one of a quiz's questions (each is answered once). Once
-   * all are answered and some were wrong, Haiku writes a note on what to review.
+   * Record the reader's pick for one of a quiz's multiple-choice questions (each is answered
+   * once). Once all questions are answered, see `review`.
    */
   async answerQuiz(
     topicId: string,
@@ -725,18 +821,47 @@ export class Workspace {
     choice: number,
     api: QuizApi = this.quizApi,
   ): Promise<void> {
-    const topic = this.topics.find((t) => t.id === topicId)
-    const chat = topic?.chats.find((c) => c.messages.some((m) => m.id === messageId))
-    const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1
-    const quiz = chat?.messages[index]?.quiz
-    if (!topic || !chat || !quiz || quiz.picked[question] !== null || !quiz.questions[question]?.choices[choice]) return
-    quiz.picked[question] = choice
-    const right = quiz.questions.filter((q, i) => quiz.picked[i] === q.answer).length
-    if (quiz.picked.some((p) => p === null) || right === quiz.questions.length) return
-    const asked = chat.messages[index - 1]
+    const at = this.quizAt(topicId, messageId)
+    if (!at || isTyped(at.quiz, question) || isAnswered(at.quiz, question) || !at.quiz.questions[question]?.choices[choice]) return
+    at.quiz.picked[question] = choice
+    await this.review(at, api)
+  }
+
+  /**
+   * Keep what the reader typed for a question: their answer to a typed question (answered
+   * once; graded with the rest at the end), or a guess before uncovering a multiple-choice
+   * question's choices, which is kept but not graded.
+   */
+  async typeQuiz(topicId: string, messageId: string, question: number, text: string, api: QuizApi = this.quizApi): Promise<void> {
+    const at = this.quizAt(topicId, messageId)
+    if (!at || !text.trim() || !at.quiz.questions[question] || isAnswered(at.quiz, question)) return
+    const { quiz } = at
+    if (!quiz.typed) quiz.typed = quiz.questions.map(() => null)
+    if (!isTyped(quiz, question) && typedText(quiz, question) !== null) return
+    quiz.typed[question] = text.trim()
+    if (isTyped(quiz, question)) await this.review(at, api)
+  }
+
+  /** Show the next of a quiz question's hints, while it is not answered. */
+  showQuizHint(topicId: string, messageId: string, question: number) {
+    const at = this.quizAt(topicId, messageId)
+    const q = at?.quiz.questions[question]
+    if (!at || !q || isAnswered(at.quiz, question)) return
+    const quiz = at.quiz
+    if (!quiz.hints_used) quiz.hints_used = quiz.questions.map(() => 0)
+    if ((quiz.hints_used[question] ?? 0) < (q.hints?.length ?? 0)) quiz.hints_used[question] = (quiz.hints_used[question] ?? 0) + 1
+  }
+
+  /**
+   * Once every question is answered, Haiku grades the typed answers and writes a note on what
+   * to review, in one call; nothing to do when there is nothing to grade and every choice was right.
+   */
+  private async review({ topic, quiz, asked }: { topic: Topic; quiz: Quiz; asked?: ChatMessage }, api: QuizApi): Promise<void> {
+    if (quiz.questions.some((_, n) => !isAnswered(quiz, n))) return
+    if (!ungraded(quiz) && rightCount(quiz) === quiz.questions.length) return
     quiz.reviewing = 'writing'
     try {
-      const recommendation = await api.recommend({
+      const { text, grades } = await api.recommend({
         topic: topic.name,
         about: {
           role: 'user',
@@ -745,7 +870,8 @@ export class Workspace {
         },
         quiz: quizRecord(quiz),
       })
-      if (recommendation) quiz.recommendation = recommendation
+      if (grades.some(Boolean)) quiz.grades = quiz.questions.map((_, n) => grades[n] ?? quiz.grades?.[n] ?? null)
+      if (text) quiz.recommendation = text
       quiz.reviewing = undefined
     } catch {
       quiz.reviewing = 'failed'
@@ -793,7 +919,7 @@ export class Workspace {
   private async converse(
     topic: Topic,
     chat: Chat,
-    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode'>,
+    asked: Pick<ChatMessage, 'text' | 'context' | 'quote' | 'mode' | 'open'>,
     fill: (() => Promise<PageContext | undefined>) | undefined,
     respond: (answer: ChatMessage, request: AskRequest, signal: AbortSignal) => Promise<void>,
   ): Promise<void> {
@@ -824,6 +950,7 @@ export class Workspace {
         ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name),
         ...(this.answerEffort && { effort: this.answerEffort }),
         ...(instructions && { instructions }),
+        ...(quizTyped.share !== DEFAULT_TYPED_SHARE && { typed_share: quizTyped.share }),
       }
       await respond(answer, request, controller.signal)
       if (controller.signal.reason === STOPPED) return this.takeBack(topic, chat, asked, question, answer)
@@ -855,7 +982,6 @@ export class Workspace {
   ) {
     chat.messages = chat.messages.filter((m) => m.id !== question.id && m.id !== answer.id)
     if (!chat.messages.length) chat.title = undefined
-    if (asked.mode === 'quiz') chat.mode = 'quiz'
     const typed = topic.draft.trim()
     topic.draft = [asked.text, typed].filter(Boolean).join('\n\n')
     topic.context ??= asked.context
@@ -877,7 +1003,8 @@ export class Workspace {
       })
       // A discussion deleted meanwhile is no longer in its topic; the title just goes nowhere.
       // A question taken back (its answer stopped) no longer names the discussion.
-      if (title && chat.messages.some((m) => m.id === asked.id)) chat.title = title
+      // A name given by hand meanwhile stands.
+      if (title && !chat.title && chat.messages.some((m) => m.id === asked.id)) chat.title = title
     } catch {
       // Without a title, the start of the question stands in.
     }
@@ -1032,7 +1159,8 @@ export class Workspace {
           const serverId = this.indexing[id]?.serverId
           const page = this.pages[id]
           const zoom = this.zooms[id]
-          return serverId ? [{ id, name: this.docs[id].name, serverId, ...(page > 1 && { page }), ...(zoom && { zoom }) }] : []
+          const { name, renamed } = this.docs[id]
+          return serverId ? [{ id, name, serverId, ...(renamed && { renamed }), ...(page > 1 && { page }), ...(zoom && { zoom }) }] : []
         })
         return {
           id: topic.id,
@@ -1067,7 +1195,7 @@ export class Workspace {
     const pages: Record<string, number> = {}
     const zooms: Record<string, number> = {}
     for (const d of saved.topics.flatMap((t) => t.docs)) {
-      docs[d.id] = { id: d.id, name: d.name }
+      docs[d.id] = { id: d.id, name: d.name, ...(d.renamed && { renamed: true }) }
       indexing[d.id] = { serverId: d.serverId, status: 'queued', pagesDone: 0, pageCount: 0 }
       if (d.page) pages[d.id] = d.page
       if (typeof d.zoom === 'number' && d.zoom > 0) zooms[d.id] = d.zoom
@@ -1135,7 +1263,8 @@ function restoredScope(saved: SavedTopic): Pick<Topic, 'scope'> {
 }
 
 function validMode(mode: unknown): Mode {
-  return mode === 'socratic' || mode === 'quiz' ? mode : 'normal'
+  // Quiz was a mode once; quizzes are now asked for in Normal.
+  return mode === 'socratic' ? mode : 'normal'
 }
 
 function isSavedWorkspace(value: unknown): value is SavedWorkspace {
@@ -1153,7 +1282,7 @@ function savedMessage(message: ChatMessage): ChatMessage {
     const { id, role, status, mode } = message
     return { id, role, text: '', status, ...(mode && { mode }) }
   }
-  const { context, ...rest } = message
+  const { context, openCard: _open, ...rest } = message
   if (!context) return { ...rest }
   const { pageImage: _image, imagePages: _pages, pageTexts: _texts, ...spot } = context
   return { ...rest, context: { ...spot, pageTexts: [] } }
@@ -1168,8 +1297,16 @@ function restoredMessage(message: ChatMessage): ChatMessage {
 }
 
 /** A quiz as the backend reads it. */
-function quizRecord({ title, questions, picked, recommendation }: Quiz): QuizRecord {
-  return { title, questions, picked, ...(recommendation && { recommendation }) }
+function quizRecord({ title, questions, picked, typed, grades, hints_used, recommendation }: Quiz): QuizRecord {
+  return {
+    title,
+    questions,
+    picked,
+    ...(typed && { typed }),
+    ...(grades && { grades }),
+    ...(hints_used && { hints_used }),
+    ...(recommendation && { recommendation }),
+  }
 }
 
 /**
@@ -1271,10 +1408,33 @@ function docNames(
 }
 
 function turnKey(message: ChatMessage): string {
-  const { quiz } = message
+  const { quiz, hints } = message
+  if (hints) return `${message.id}/h${hints.revealed}`
   if (!quiz) return message.id
-  const answered = quiz.picked.filter((p) => p !== null).length
-  return `${message.id}/${answered}${quiz.recommendation ? '+' : ''}`
+  const answered = quiz.questions.filter((_, n) => isAnswered(quiz, n)).length
+  const graded = quiz.grades?.filter(Boolean).length ?? 0
+  return `${message.id}/${answered}${graded ? `g${graded}` : ''}${quiz.recommendation ? '+' : ''}`
+}
+
+/**
+ * The quiz question or turned-over hint on show in one of the last two answers, so a question
+ * like "why not B?" reaches the model with it. Undefined when none is.
+ */
+export function openCard(messages: ChatMessage[]): OpenCard | undefined {
+  const answers = messages.filter((m) => m.role === 'assistant').slice(-2).reverse()
+  const card = answers.find((m) => m.quiz || m.hints?.revealed)
+  if (card?.quiz) {
+    const { questions } = card.quiz
+    const i = card.openCard ?? firstOpen(card.quiz)
+    const q = questions[i]
+    return q && { kind: 'quiz', number: i + 1, of: questions.length, text: q.question }
+  }
+  if (card?.hints) {
+    const { items, revealed } = card.hints
+    const i = Math.min(card.openCard ?? revealed - 1, revealed - 1)
+    return items[i] !== undefined ? { kind: 'hint', number: i + 1, of: items.length, text: items[i] } : undefined
+  }
+  return undefined
 }
 
 /** One message as the backend reads it. */
@@ -1285,6 +1445,8 @@ function requestTurn(m: ChatMessage, withImages: boolean, serverId: (docId: stri
     context: m.context && contextForRequest(m.context, withImages, serverId(m.context.docId)),
     ...(m.role === 'user' && m.mode && { mode: m.mode }),
     ...(m.quiz && { quiz: quizRecord(m.quiz) }),
+    ...(m.hints && { hints: { items: m.hints.items, revealed: m.hints.revealed } }),
+    ...(m.role === 'user' && m.open && { open: m.open }),
   }
 }
 

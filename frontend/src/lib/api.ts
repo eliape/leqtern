@@ -1,29 +1,60 @@
-/** One multiple-choice question: `answer` is the index of the right choice. */
+/**
+ * One question. Multiple choice (`kind` 'choice' or missing): `answer` is the index of the right
+ * choice. Typed: the reader types an answer, compared with `model_answer`; no choices, `answer` -1.
+ */
 export type QuizQuestion = {
+  kind?: 'choice' | 'typed'
   question: string
   choices: string[]
   answer: number
   explanation: string
   /** For each choice, the mistake that leads to it; null for the right one. Older quizzes have none. */
   misconceptions?: (string | null)[]
+  /** Hints the reader can ask for while answering, gentlest first (at most two). */
+  hints?: string[]
+  /** Typed questions: the answer, and what an answer must get right to count. */
+  model_answer?: string | null
+  key_points?: string[]
 }
+
+/** How a typed answer was graded, with a sentence on what was missing or wrong. */
+export type Grade = { verdict: 'right' | 'partly' | 'wrong'; feedback: string }
 
 /** A quiz as the model writes it. */
 export type WrittenQuiz = { title: string; questions: QuizQuestion[] }
 
-/** A quiz as the chat keeps it: with the reader's pick for each question, and what to review. */
-export type QuizRecord = WrittenQuiz & { picked: (number | null)[]; recommendation?: string }
+/**
+ * A quiz as the chat keeps it: the reader's pick for each multiple-choice question; what they
+ * typed for each question (a typed answer, or a guess before seeing the choices); grades for
+ * what they typed (typed answers only, for now; guesses could earn bonus points later); and
+ * what to review. Older quizzes have no `typed` or `grades`.
+ */
+export type QuizRecord = WrittenQuiz & {
+  picked: (number | null)[]
+  typed?: (string | null)[]
+  grades?: (Grade | null)[]
+  /** For each question, how many of its hints the reader looked at. */
+  hints_used?: number[]
+  recommendation?: string
+}
 
 /** One turn of the conversation, as the backend reads it. */
 export type AskTurn = {
   role: 'user' | 'assistant'
   text: string
   context?: Record<string, unknown>
-  /** Set on the reader's turns in a Socratic session, where the model asks the questions, and on quiz requests. */
+  /** Set on the reader's turns in a Socratic session, where the model asks the questions, and on quiz requests from older chats. */
   mode?: 'socratic' | 'quiz'
   /** On the model's side: a quiz it wrote, with how the reader did. */
   quiz?: QuizRecord
+  /** On the model's side: hints it showed, with how many the reader turned over. */
+  hints?: Hints
+  /** On the reader's side: the quiz question or hint they had open in the chat when asking. */
+  open?: OpenCard
 }
+
+/** A quiz question or a hint on show in the chat, as a question about it needs it. */
+export type OpenCard = { kind: 'quiz' | 'hint'; number: number; of: number; text: string }
 
 export type AskRequest = {
   topic: string
@@ -44,13 +75,21 @@ export type AskRequest = {
   /** What the topic covers and what the reader studies it for, and the conventions its answers follow, in their words. */
   scope?: string
   conventions?: string
+  /** The most of a quiz's questions that may be typed, from 0 to 1. The backend's default (0.4) when left out. */
+  typed_share?: number
 }
 
 /**
  * A piece of an answer's text, a piece of the summary of the model's thinking, or a lookup
  * the model made while answering.
  */
-export type AnswerEvent = { type: 'text' | 'thinking' | 'step'; text: string }
+export type AnswerEvent =
+  | { type: 'text' | 'thinking' | 'step'; text: string }
+  | { type: 'hints'; hints: string[] }
+  | { type: 'quiz'; quiz: WrittenQuiz }
+
+/** Hints the model showed for an exercise, and how many of them the reader has turned over. */
+export type Hints = { items: string[]; revealed: number }
 
 /** Something that streams an answer. `fetchAnswer` is the real one; tests pass fakes. */
 export type AnswerStream = (request: AskRequest, signal?: AbortSignal) => AsyncIterable<AnswerEvent>
@@ -80,8 +119,11 @@ export async function* fetchAnswer(
     buffered = done ? '' : lines.pop()!
     for (const line of lines) {
       if (!line.trim()) continue
-      const event = JSON.parse(line) as { type: string; text?: string; message?: string }
-      if ((event.type === 'text' || event.type === 'thinking' || event.type === 'step') && event.text)
+      const event = JSON.parse(line) as { type: string; text?: string; message?: string; hints?: unknown; quiz?: WrittenQuiz }
+      if (event.type === 'quiz' && event.quiz && Array.isArray(event.quiz.questions)) yield { type: 'quiz', quiz: event.quiz }
+      else if (event.type === 'hints' && Array.isArray(event.hints))
+        yield { type: 'hints', hints: event.hints.filter((h): h is string => typeof h === 'string') }
+      else if ((event.type === 'text' || event.type === 'thinking' || event.type === 'step') && event.text)
         yield { type: event.type, text: event.text }
       else if (event.type === 'error') throw new Error(event.message ?? 'Something went wrong while answering.')
       else if (event.type === 'done') return
@@ -116,6 +158,12 @@ export type IndexStatus = {
   pages_done: number
   page_count: number
   error?: string
+  /** From the index, once it is ready: the document's own title and what kind of document it is. */
+  title?: string
+  kind?: string
+  /** The name the PDF was first uploaded under, and when (Unix seconds). */
+  file_name?: string
+  uploaded?: number
 }
 
 /** Give the backend a PDF to keep and index. Adding the same file again is cheap: it is stored once. */
@@ -204,30 +252,22 @@ export async function saveWorkspace(
   return { revision: saved.revision ?? from.base, deleted: saved.deleted ?? [], later: saved.later ?? [] }
 }
 
-/** Have the model write a multiple-choice quiz for the newest turn, which asks for one. */
-export async function createQuiz(request: AskRequest, signal?: AbortSignal, fetchFn: typeof fetch = fetch): Promise<WrittenQuiz> {
-  const res = await fetchFn('/api/quiz', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-    signal,
-  })
-  if (!res.ok) throw await backendError(res)
-  return (await res.json()) as WrittenQuiz
-}
-
 /** What a finished quiz was about (the request for it) and how it went. */
 export type RecommendationRequest = { topic: string; about: AskTurn; quiz: QuizRecord }
 
-/** A short note on what to review after a quiz, or null when every answer was right. */
-export async function fetchRecommendation(request: RecommendationRequest, fetchFn: typeof fetch = fetch): Promise<string | null> {
+/** After a quiz: grades for its typed answers (by question, null for the rest) and what to review. */
+export type QuizReview = { text: string | null; grades: (Grade | null)[] }
+
+/** Grades for a quiz's typed answers and a short note on what to review (null when every answer was right). */
+export async function fetchRecommendation(request: RecommendationRequest, fetchFn: typeof fetch = fetch): Promise<QuizReview> {
   const res = await fetchFn('/api/quiz/recommendation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   })
   if (!res.ok) throw await backendError(res)
-  return ((await res.json()) as { text: string | null }).text
+  const review = (await res.json()) as Partial<QuizReview>
+  return { text: review.text ?? null, grades: review.grades ?? [] }
 }
 
 /** The first question of a discussion, for Haiku to name it. */

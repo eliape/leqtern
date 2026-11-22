@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from leqtern import main
 from leqtern.ask import (
-    QUIZ_SECTION,
     QUIZ_START,
     SOCRATIC_END,
     SOCRATIC_START,
@@ -21,15 +20,14 @@ from leqtern.ask import (
     describe,
     request_system,
     system_blocks,
-    write_quiz,
 )
 from leqtern.config import Settings, get_settings
 from leqtern.quiz import (
     Distractor,
-    Quiz,
+    Grade,
     QuizQuestion,
     QuizRecord,
-    Recommendation,
+    Review,
     WrittenQuestion,
     WrittenQuiz,
     arrange,
@@ -294,19 +292,16 @@ def quiz(**overrides: object) -> QuizRecord:
     return QuizRecord.model_validate(fields)
 
 
-def test_a_quiz_request_is_marked_and_says_what_to_focus_on() -> None:
+def test_a_quiz_request_from_an_older_chat_reads_as_asking_for_one() -> None:
     spot = context(point=Point(x=0.5, y=0.5), page_image="PAGE")
     plain = AskRequest(topic="T", messages=[Turn(role="user", text="", context=spot, mode="quiz")])
-    # With nothing to focus on, the quiz covers the section they are reading.
-    assert build_messages(plain)[0]["content"][-1]["text"] == f"[Quiz] {QUIZ_SECTION}"
+    assert build_messages(plain)[0]["content"][-1]["text"] == QUIZ_START
     focused = AskRequest(
         topic="T", messages=[Turn(role="user", text="the chain rule", context=spot, mode="quiz")]
     )
     content = build_messages(focused)[0]["content"]
-    assert content[-1]["text"] == f"[Quiz] {QUIZ_START} Focus on: the chain rule"
-    # The newest request carries the images, like a question.
-    assert any(b["type"] == "image" for b in content)
-    assert "[Quiz]" in SYSTEM_PROMPT and "[Quiz results]" in SYSTEM_PROMPT
+    assert content[-1]["text"] == "Quiz me on: the chain rule"
+    assert "make_quiz" in SYSTEM_PROMPT and "[Quiz results]" in SYSTEM_PROMPT
 
 
 def test_a_quiz_and_how_they_did_go_into_the_history() -> None:
@@ -366,38 +361,6 @@ def written_question(question: str, answer: str, *wrong: str) -> WrittenQuestion
     )
 
 
-async def test_write_quiz_uses_the_chosen_model_and_drops_broken_questions() -> None:
-    written = WrittenQuiz(
-        title="Derivatives",
-        questions=[
-            written_question("What is f'(x) for x^2?", "2x", "x", "x^2", "2"),
-            written_question("No wrong answers", "a"),
-            written_question("No right answer", " ", "b", "c"),
-        ],
-    )
-    fake = FakeIndexClient(lambda _kwargs: written)
-    request = AskRequest(
-        topic="Calculus", messages=[Turn(role="user", text="", context=context(), mode="quiz")]
-    )
-    reading = [{"type": "text", "text": "The section they are reading"}]
-    result = await write_quiz(fake, request, model="claude-sonnet-5-5", reading=reading)  # type: ignore[arg-type]
-    [question] = result.questions
-    assert sorted(question.choices) == ["2", "2x", "x", "x^2"]
-    assert question.choices[question.answer] == "2x"
-    # Each wrong choice keeps the mistake behind it; the right one has none.
-    for choice, why in zip(question.choices, question.misconceptions, strict=True):
-        assert why == (None if choice == "2x" else f"Why {choice}.")
-    sent = fake.requests[0]
-    assert sent["model"] == "claude-sonnet-5-5"
-    assert sent["output_format"] is WrittenQuiz
-    # The section's pages come just before the request.
-    *_, section, asked = sent["messages"][-1]["content"]
-    assert section == reading[0]
-    assert asked["text"] == f"[Quiz] {QUIZ_SECTION}"
-    # Only another quiz could read what a quiz caches, so it is cached for 5 minutes, not an hour.
-    assert sent["system"][-1]["cache_control"] == {"type": "ephemeral"}
-
-
 def test_the_right_answer_lands_evenly_among_the_choices() -> None:
     # The model writes the right answer first; over many questions it lands on each letter
     # about as often, and each wrong choice keeps the mistake behind it.
@@ -419,66 +382,129 @@ def test_quiz_writing_rules_are_in_the_prompt() -> None:
         assert rule in SYSTEM_PROMPT or rule in str(WrittenQuiz.model_json_schema())
 
 
-async def test_write_quiz_fails_when_no_questions_come_back() -> None:
-    fake = FakeIndexClient(lambda _kwargs: WrittenQuiz(title="Empty", questions=[]))
-    request = AskRequest(topic="T", messages=[Turn(role="user", text="", mode="quiz")])
-    with pytest.raises(RuntimeError):
-        await write_quiz(fake, request)  # type: ignore[arg-type]
-
-
-def test_quiz_endpoint_only_writes_quizzes(client: TestClient, monkeypatch) -> None:
-    async def fake_write(_client, request, _usage, model, reading, **_):
-        assert request.messages[-1].mode == "quiz"
-        assert reading == []
-        return Quiz(title=f"By {model}", questions=quiz().questions)
-
-    main.app.dependency_overrides[main.get_client] = lambda: object()
-    monkeypatch.setattr(main, "write_quiz", fake_write)
-    turn = {"role": "user", "text": "", "mode": "quiz"}
-    response = client.post(
-        "/api/quiz", json={"topic": "T", "messages": [turn], "model": "claude-sonnet-5-5"}
-    )
-    assert response.status_code == 200
-    assert response.json()["title"] == "By claude-sonnet-5-5"
-    assert response.json()["questions"][0]["answer"] == 1
-    # A document the backend doesn't have adds no section to read.
-    at = {**turn, "context": {"doc_id": "missing", "doc_name": "a.pdf", "page": 3}}
-    assert client.post("/api/quiz", json={"topic": "T", "messages": [at]}).status_code == 200
-    plain = client.post("/api/quiz", json={"topic": "T", "messages": [{**turn, "mode": None}]})
-    assert plain.status_code == 422
-
-
 def test_quiz_recommendation_comes_from_haiku_only_when_something_was_wrong(
     client: TestClient,
 ) -> None:
-    fake = FakeIndexClient(lambda _kwargs: Recommendation(text=" Read p. 12 again. "))
+    fake = FakeIndexClient(lambda _kwargs: Review(recommendation=" Read p. 12 again. "))
     main.app.dependency_overrides[main.get_client] = lambda: fake
     about = {"role": "user", "text": "the power rule", "context": {"doc_name": "a.pdf", "page": 3}}
     wrong = quiz(picked=[0, 0]).model_dump()
     response = client.post(
         "/api/quiz/recommendation", json={"topic": "T", "about": about, "quiz": wrong}
     )
-    assert response.json() == {"text": "Read p. 12 again."}
+    assert response.json() == {"text": "Read p. 12 again.", "grades": [None, None]}
     sent = fake.requests[0]
     assert sent["model"] == "claude-haiku-5-5"
     prompt = sent["messages"][0]["content"]
-    assert "They are reading p. 3 of a.pdf." in prompt and "focus on: the power rule" in prompt
+    assert "They are reading p. 3 of a.pdf." in prompt and "They asked: the power rule" in prompt
     # Maths comes back as LaTeX, which the app renders.
     assert "LaTeX between dollar signs" in prompt
     assert "1. Wrong: they chose A) x" in prompt
-    # Without a focus, the quiz was about the section.
-    client.post(
-        "/api/quiz/recommendation",
-        json={"topic": "T", "about": {**about, "text": ""}, "quiz": wrong},
-    )
-    assert "covered the section they were reading" in fake.requests[1]["messages"][0]["content"]
 
     right = quiz(picked=[1, 0]).model_dump()
     response = client.post(
         "/api/quiz/recommendation", json={"topic": "T", "about": about, "quiz": right}
     )
-    assert response.json() == {"text": None}
-    assert len(fake.requests) == 2
+    assert response.json() == {"text": None, "grades": []}
+    assert len(fake.requests) == 1
+
+
+def typed_question(question: str = "What is d/dx of x^3?") -> QuizQuestion:
+    return QuizQuestion(
+        kind="typed",
+        question=question,
+        explanation="The power rule.",
+        model_answer="$3x^2$",
+        key_points=["the factor 3", "the power 2"],
+    )
+
+
+def test_typed_answers_are_graded_with_the_note_in_one_haiku_call(client: TestClient) -> None:
+    fake = FakeIndexClient(
+        lambda _kwargs: Review(
+            grades=[Grade(verdict="partly", feedback="Missed the factor 3.")],
+            recommendation="Go over the power rule.",
+        )
+    )
+    main.app.dependency_overrides[main.get_client] = lambda: fake
+    record = quiz(
+        questions=[*quiz().questions, typed_question()],
+        picked=[1, 0, None],
+        typed=["2x", None, "x^2"],
+        hints_used=[0, 1],
+    )
+    response = client.post(
+        "/api/quiz/recommendation",
+        json={"topic": "T", "about": {"role": "user", "text": ""}, "quiz": record.model_dump()},
+    )
+    assert response.json() == {
+        "text": "Go over the power rule.",
+        "grades": [None, None, {"verdict": "partly", "feedback": "Missed the factor 3."}],
+    }
+    prompt = fake.requests[0]["messages"][0]["content"]
+    assert "grade their typed answers, in this order: 3." in prompt
+    assert "3. (typed answer) What is d/dx of x^3?" in prompt
+    assert "Model answer: $3x^2$" in prompt and "the factor 3; the power 2" in prompt
+    assert "3. They wrote: x^2 (not graded)." in prompt
+    # A guess typed before seeing the options goes along too, and so do hints used.
+    assert "1. Right. Before seeing the options they guessed: 2x." in prompt
+    assert "2. Right. (after 1 hint)" in prompt
+
+
+def test_a_graded_typed_answer_reads_in_the_history() -> None:
+    record = quiz(
+        questions=[typed_question()],
+        typed=["3x^2"],
+        grades=[Grade(verdict="right", feedback="")],
+    )
+    from leqtern.quiz import results_text
+
+    expected = "[Quiz results] They got 1 of 1 right.\n1. Right: they wrote 3x^2."
+    assert results_text(record) == expected
+
+
+def written_typed(question: str, *wrong: str) -> WrittenQuestion:
+    return written_question(question, "42", *wrong).model_copy(
+        update={"kind": "typed", "key_points": ["the number"]}
+    )
+
+
+def test_typed_questions_are_capped_at_two_in_five() -> None:
+    choice = [written_question(f"C{n}?", "r", "a", "b", "c") for n in range(3)]
+    typed = [written_typed(f"T{n}?") for n in range(3)]
+    # 3 choice + 3 typed: the last typed one goes (2 of 5), as it has no wrong answers.
+    arranged = arrange(WrittenQuiz(title="T", questions=[*choice, *typed])).questions
+    assert [q.question for q in arranged] == ["C0?", "C1?", "C2?", "T0?", "T1?"]
+    assert [q.kind for q in arranged].count("typed") == 2
+    t = arranged[3]
+    assert (t.choices, t.model_answer, t.key_points) == ([], "42", ["the number"])
+    # One with wrong answers becomes multiple choice instead of going.
+    spare = written_typed("T9?", "a", "b", "c")
+    arranged = arrange(WrittenQuiz(title="T", questions=[*choice[:2], typed[0], spare])).questions
+    assert [(q.question, q.kind) for q in arranged] == [
+        ("C0?", "choice"),
+        ("C1?", "choice"),
+        ("T0?", "typed"),
+        ("T9?", "choice"),
+    ]
+    # A quiz of only typed questions keeps none of them... unless one can be multiple choice.
+    assert arrange(WrittenQuiz(title="T", questions=typed)).questions == []
+    # Hints go along, at most two, without empty ones.
+    hinted = written_question("H?", "r", "a").model_copy(update={"hints": ["one", " ", "two", "3"]})
+    assert arrange(WrittenQuiz(title="T", questions=[hinted])).questions[0].hints == ["one", "two"]
+    # The reader's setting moves the cap: none, or all of them.
+    mixed = WrittenQuiz(title="T", questions=[*choice, *typed])
+    assert [q.kind for q in arrange(mixed, typed_share=0).questions].count("typed") == 0
+    assert [q.kind for q in arrange(mixed, typed_share=1).questions].count("typed") == 3
+
+
+def test_a_typed_share_other_than_the_default_goes_in_the_system_prompt() -> None:
+    def topic_block(share: float) -> str:
+        return request_system(AskRequest(topic="T", messages=[], typed_share=share))[-1]["text"]
+
+    assert "quiz setting" not in topic_block(0.4)
+    assert "at most 60% of a quiz's questions typed" in topic_block(0.6)
+    assert "no typed questions" in topic_block(0)
 
 
 def test_without_an_attachment_the_page_is_named_not_shown() -> None:

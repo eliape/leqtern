@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { AskRequest, DiscussionRequest, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
+import { setTypedQuizShare } from './quizMask.svelte'
+import type { AskRequest, DiscussionRequest, Grade, IndexStatus, RecommendationRequest, WrittenQuiz } from './api'
 import type { PageContext } from './context'
 import {
   type QuizApi,
   Workspace,
   askRequest,
   chatOf,
+  openCard,
+  QUIZ_ME,
   chatTitle,
   discussionRequest,
   discussions,
@@ -192,6 +195,46 @@ describe('Workspace', () => {
     expect(ws.activeTopic?.name).toBe('Linear algebra')
   })
 
+  it('renames sources and discussions, and a hand-given name outlasts Haiku', async () => {
+    const ws = new Workspace()
+    let titled!: (title: string) => void
+    ws.titleApi = () => new Promise((resolve) => (titled = resolve))
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    ws.renameDoc(doc.id, ' Week 3 notes ')
+    expect(ws.docs[doc.id].name).toBe('Week 3 notes')
+    ws.renameDoc(doc.id, '  ')
+    expect(ws.docs[doc.id].name).toBe('Week 3 notes')
+    expect(ws.docs[doc.id].renamed).toBe(true)
+
+    const topic = ws.activeTopic!
+    topic.draft = 'What is a basis?'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'text', text: 'A set of vectors…' }
+    })
+    const chat = chatOf(topic)
+    ws.renameChat(topic.id, chat.id, 'Bases')
+    titled('Haiku title')
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(chatTitle(chat)).toBe('Bases')
+  })
+
+  it('names a source by its index title or file name, as set, and always by a name given by hand', () => {
+    localStorage.removeItem('leqtern.indexTitles')
+    const ws = new Workspace()
+    const doc = ws.addDoc('l4.pdf', bytes(1))
+    expect(ws.docName(doc.id)).toBe('l4.pdf')
+    ws.indexing[doc.id] = { status: 'ready', pagesDone: 3, pageCount: 3, title: 'Lecture 4: Eigenvalues' }
+    expect(ws.docName(doc.id)).toBe('Lecture 4: Eigenvalues')
+    ws.setIndexTitles(false)
+    expect(ws.docName(doc.id)).toBe('l4.pdf')
+    expect(new Workspace().indexTitles).toBe(false)
+    ws.renameDoc(doc.id, 'Week 4')
+    expect(ws.docName(doc.id)).toBe('Week 4')
+    ws.setIndexTitles(true)
+    expect(ws.docName(doc.id)).toBe('Week 4')
+    localStorage.removeItem('leqtern.indexTitles')
+  })
+
   it('deletes a topic with its PDFs and selects a neighbour', () => {
     const ws = new Workspace()
     const first = ws.createTopic('First')
@@ -278,6 +321,55 @@ describe('Workspace.ask', () => {
     topic.draft = 'And?'
     await ws.ask(topic.id, undefined, answer)
     expect(requests[1].messages[1]).toEqual({ role: 'assistant', text: 'Because.' })
+  })
+
+  it('keeps hints from an answer, turns them over one at a time and sends them back', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'Hint for exercise 2?'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'hints' as const, hints: ['Look at the limits.', 'Substitute u = x².'] }
+    })
+    const answer = chatOf(topic).messages[1]
+    expect(answer.hints).toEqual({ items: ['Look at the limits.', 'Substitute u = x².'], revealed: 0 })
+    ws.revealHint(topic.id, answer.id)
+    ws.revealHint(topic.id, answer.id)
+    ws.revealHint(topic.id, answer.id)
+    expect(answer.hints?.revealed).toBe(2)
+    topic.draft = 'Still stuck'
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield { type: 'text' as const, text: 'OK.' }
+    })
+    expect(requests[0].messages[1].hints).toEqual({ items: ['Look at the limits.', 'Substitute u = x².'], revealed: 2 })
+  })
+
+  it('sends the hint or quiz question on show with the next question', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    topic.draft = 'Hints?'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'hints' as const, hints: ['One', 'Two', 'Three'] }
+    })
+    const answer = chatOf(topic).messages[1]
+    // Nothing turned over yet: nothing is on show.
+    expect(openCard(chatOf(topic).messages)).toBeUndefined()
+    ws.revealHint(topic.id, answer.id)
+    ws.revealHint(topic.id, answer.id)
+    answer.openCard = 0
+    topic.draft = 'Why is x not y?'
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield { type: 'text' as const, text: 'Because.' }
+    })
+    expect(requests[0].messages[2].open).toEqual({ kind: 'hint', number: 1, of: 3, text: 'One' })
+    // A card face down is not on show, so the newest turned over one is.
+    answer.openCard = 2
+    expect(openCard(chatOf(topic).messages)?.number).toBe(2)
   })
 
   it('streams the answer into the chat and sends the attached context with the question', async () => {
@@ -440,23 +532,6 @@ describe('Workspace.ask', () => {
     expect(notes[0].messages.map((m) => m.text)).toEqual(['Ask again', 'Done.'])
   })
 
-  it('goes back to Quiz mode when a quiz being written is stopped', async () => {
-    const ws = new Workspace()
-    ws.addDoc('notes.pdf', bytes(1))
-    const topic = ws.activeTopic!
-    ws.setMode(topic.id, 'quiz')
-    topic.draft = 'derivatives'
-    const quizApi: QuizApi = { create: (_request, signal) => aborted(signal!), recommend: async () => null }
-    const pending = ws.ask(topic.id, undefined, undefined, quizApi)
-    await new Promise((resolve) => setTimeout(resolve))
-    expect(chatOf(topic).mode).toBe('normal')
-    ws.stop(topic.id)
-    await pending
-    expect(chatOf(topic).messages).toEqual([])
-    expect(chatOf(topic).mode).toBe('quiz')
-    expect(topic.draft).toBe('derivatives')
-  })
-
   it('starts a new discussion, keeping the old one, its answer, the draft and the attached spot', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
@@ -608,7 +683,7 @@ describe('Workspace.ask', () => {
     expect(modes).toEqual(['socratic', undefined])
   })
 
-  it('sends nothing while an answer is arriving, not even to start a session or a quiz', async () => {
+  it('sends nothing while an answer is arriving, not even to start a session', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
@@ -619,9 +694,9 @@ describe('Workspace.ask', () => {
     })
     await Promise.resolve()
     ws.attachContext(topic.id, context(doc.id, 5))
-    ws.setMode(topic.id, 'quiz')
+    ws.setMode(topic.id, 'socratic')
     expect(ws.canSend(topic.id)).toBe(false)
-    await ws.ask(topic.id, undefined, undefined, fakeQuizApi().api)
+    await ws.ask(topic.id)
     expect(chatOf(topic).messages).toHaveLength(2)
     finish()
     await pending
@@ -646,64 +721,59 @@ describe('Workspace.ask', () => {
     expect(first.mode).toBe('normal')
     expect(topic.context?.page).toBe(6)
     // While it is still empty, Quiz me reuses it rather than piling up empty discussions.
-    ws.attachContext(topic.id, context(doc.id, 7), 'quiz')
+    ws.quizOn(topic.id, context(doc.id, 7))
     expect(chatOf(topic)).toBe(session)
-    expect(session.mode).toBe('quiz')
+    expect(session.mode).toBe('normal')
+    expect(topic.draft).toBe(QUIZ_ME)
     expect(topic.chats).toHaveLength(2)
   })
 
 
-  function fakeQuizApi(recommendation: string | null = 'Read p. 12 again.') {
-    const created: AskRequest[] = []
+  function fakeQuizApi(recommendation: string | null = 'Read p. 12 again.', grades: (Grade | null)[] = []) {
     const recommended: RecommendationRequest[] = []
     const api: QuizApi = {
-      create: async (request) => {
-        created.push(request)
-        return structuredClone(written)
-      },
       recommend: async (request) => {
         recommended.push(request)
-        return recommendation
+        return { text: recommendation, grades }
       },
     }
-    return { api, created, recommended }
+    return { api, recommended }
   }
 
-  it('writes a quiz in Quiz mode, about the attached spot and what the reader asked it to cover', async () => {
+  /** An answer that is only a quiz, as the model shows one with its quiz tool. */
+  async function* quizStream() {
+    yield { type: 'quiz' as const, quiz: structuredClone(written) }
+  }
+
+  it('shows a quiz the model writes when Quiz me asks for one about the spot', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    const { api, created } = fakeQuizApi()
-    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
-    topic.draft = ' the chain rule '
-    await ws.ask(topic.id, undefined, undefined, api)
+    ws.quizOn(topic.id, context(doc.id, 5))
+    const requests: AskRequest[] = []
+    await ws.ask(topic.id, undefined, async function* (request) {
+      requests.push(request)
+      yield* quizStream()
+    })
 
-    expect(created[0].messages).toEqual([
-      { role: 'user', text: 'the chain rule', mode: 'quiz', context: expect.objectContaining({ page: 5, page_image: 'PAGE' }) },
+    expect(requests[0].messages).toEqual([
+      { role: 'user', text: QUIZ_ME, context: expect.objectContaining({ page: 5, page_image: 'PAGE' }) },
     ])
     const [asked, quiz] = chatOf(topic).messages
-    expect(asked).toMatchObject({ role: 'user', text: 'the chain rule', mode: 'quiz' })
-    expect(quiz).toMatchObject({ role: 'assistant', mode: 'quiz', status: 'done', text: '' })
+    expect(asked).toMatchObject({ role: 'user', text: QUIZ_ME })
+    expect(quiz).toMatchObject({ role: 'assistant', status: 'done', text: '' })
     expect(quiz.quiz).toEqual({ ...written, picked: [null, null] })
-    // Sending a quiz goes back to Normal, so the next question is an ordinary one.
     expect(chatOf(topic).mode).toBe('normal')
-    expect(ws.canSend(topic.id)).toBe(false)
   })
 
-  it('cancels Socratic or Quiz mode when the spot it was waiting for is taken off', () => {
+  it('cancels Socratic mode when the spot it was waiting for is taken off', () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    for (const mode of ['socratic', 'quiz'] as const) {
-      ws.attachContext(topic.id, context(doc.id, 5), mode)
-      ws.clearContext(topic.id)
-      expect(topic.context).toBeUndefined()
-      expect(chatOf(topic).mode).toBe('normal')
-    }
-    // Picked from the menu with nothing attached, the mode stays.
-    ws.setMode(topic.id, 'quiz')
+    ws.attachContext(topic.id, context(doc.id, 5), 'socratic')
     ws.clearContext(topic.id)
-    expect(chatOf(topic).mode).toBe('quiz')
+    expect(topic.context).toBeUndefined()
+    expect(chatOf(topic).mode).toBe('normal')
   })
 
   it('takes each quiz answer once, and asks for a note on what to review only after a wrong one', async () => {
@@ -711,9 +781,9 @@ describe('Workspace.ask', () => {
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
     const { api, recommended } = fakeQuizApi()
-    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
+    ws.quizOn(topic.id, context(doc.id, 5))
     topic.draft = 'the power rule'
-    await ws.ask(topic.id, undefined, undefined, api)
+    await ws.ask(topic.id, undefined, quizStream)
     const message = chatOf(topic).messages[1]
 
     await ws.answerQuiz(topic.id, message.id, 0, 0, api)
@@ -734,8 +804,8 @@ describe('Workspace.ask', () => {
     expect(message.quiz).toMatchObject({ recommendation: 'Read p. 12 again.', reviewing: undefined })
 
     // All right: nothing to review, and no call. (Quiz me opens a new discussion for it.)
-    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
-    await ws.ask(topic.id, undefined, undefined, api)
+    ws.quizOn(topic.id, context(doc.id, 5))
+    await ws.ask(topic.id, undefined, quizStream)
     const perfect = chatOf(topic).messages[1]
     await ws.answerQuiz(topic.id, perfect.id, 0, 1, api)
     await ws.answerQuiz(topic.id, perfect.id, 1, 0, api)
@@ -743,36 +813,71 @@ describe('Workspace.ask', () => {
     expect(perfect.quiz!.recommendation).toBeUndefined()
   })
 
+  it('keeps a guess and a typed answer, and grades typed answers with the note at the end', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const grade: Grade = { verdict: 'partly', feedback: 'Missed the factor 3.' }
+    const { api, recommended } = fakeQuizApi('Go over the power rule.', [null, grade])
+    const typed = { kind: 'typed' as const, question: 'd/dx of $x^3$?', choices: [], answer: -1, explanation: 'Power rule.', model_answer: '$3x^2$' }
+    topic.draft = 'Quiz me'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'quiz' as const, quiz: { title: 'D', questions: [written.questions[0], typed] } }
+    })
+    const message = chatOf(topic).messages[1]
+
+    // A guess before the choices is kept once, and does not answer the question.
+    await ws.typeQuiz(topic.id, message.id, 0, ' 2x ', api)
+    await ws.typeQuiz(topic.id, message.id, 0, 'x', api)
+    expect(message.quiz!.typed).toEqual(['2x', null])
+    await ws.answerQuiz(topic.id, message.id, 0, 1, api)
+    // A typed question takes no pick, and an empty answer does not count.
+    await ws.answerQuiz(topic.id, message.id, 1, 0, api)
+    await ws.typeQuiz(topic.id, message.id, 1, '  ', api)
+    expect(recommended).toEqual([])
+
+    // All right on the choices, but a typed answer still gets graded.
+    await ws.typeQuiz(topic.id, message.id, 1, 'x^2', api)
+    expect(recommended).toHaveLength(1)
+    expect(recommended[0].quiz).toMatchObject({ picked: [1, null], typed: ['2x', 'x^2'] })
+    expect(message.quiz).toMatchObject({ grades: [null, grade], recommendation: 'Go over the power rule.', reviewing: undefined })
+    await ws.typeQuiz(topic.id, message.id, 1, 'changed', api)
+    expect(message.quiz!.typed![1]).toBe('x^2')
+  })
+
+  it('sends the typed-question share only when it is not the default', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const requests: AskRequest[] = []
+    const stream = async function* (request: AskRequest) {
+      requests.push(request)
+      yield { type: 'text' as const, text: 'ok' }
+    }
+    topic.draft = 'one'
+    await ws.ask(topic.id, undefined, stream)
+    setTypedQuizShare(0.2)
+    topic.draft = 'two'
+    await ws.ask(topic.id, undefined, stream)
+    setTypedQuizShare(0.4)
+    expect(requests.map((r) => r.typed_share)).toEqual([undefined, 0.2])
+  })
+
   it('says so when the note on what to review could not be written', async () => {
     const ws = new Workspace()
     ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
     const api: QuizApi = {
-      create: async () => structuredClone(written),
       recommend: async () => {
         throw new Error('offline')
       },
     }
-    ws.setMode(topic.id, 'quiz')
-    await ws.ask(topic.id, undefined, undefined, api)
+    topic.draft = 'Quiz me'
+    await ws.ask(topic.id, undefined, quizStream)
     const message = chatOf(topic).messages[1]
     await ws.answerQuiz(topic.id, message.id, 0, 0, api)
     await ws.answerQuiz(topic.id, message.id, 1, 1, api)
     expect(message.quiz!.reviewing).toBe('failed')
-  })
-
-  it('shows a quiz that could not be written as an error', async () => {
-    const ws = new Workspace()
-    ws.addDoc('notes.pdf', bytes(1))
-    const topic = ws.activeTopic!
-    ws.setMode(topic.id, 'quiz')
-    await ws.ask(topic.id, undefined, undefined, {
-      create: async () => {
-        throw new Error('The model service returned an error (529). Try again.')
-      },
-      recommend: async () => null,
-    })
-    expect(chatOf(topic).messages[1]).toMatchObject({ status: 'error', text: 'The model service returned an error (529). Try again.' })
   })
 
   it('sends a quiz and how it went with later questions, so the model can adapt', async () => {
@@ -780,11 +885,10 @@ describe('Workspace.ask', () => {
     const doc = ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
     const { api } = fakeQuizApi()
-    ws.attachContext(topic.id, context(doc.id, 5), 'quiz')
-    await ws.ask(topic.id, undefined, undefined, api)
+    ws.quizOn(topic.id, context(doc.id, 5))
+    await ws.ask(topic.id, undefined, quizStream)
     await ws.answerQuiz(topic.id, chatOf(topic).messages[1].id, 0, 0, api)
     await ws.answerQuiz(topic.id, chatOf(topic).messages[1].id, 1, 0, api)
-    ws.setMode(topic.id, 'normal')
     topic.draft = 'Why 2x?'
     const requests: AskRequest[] = []
     await ws.ask(topic.id, undefined, async function* (request) {
@@ -1185,7 +1289,8 @@ describe('Workspace saving', () => {
     )
     const topic = back.activeTopic!
     expect(topic.chats).toHaveLength(1)
-    expect(chatOf(topic)).toMatchObject({ mode: 'quiz', messages: [{ id: 'q' }, { id: 'a' }] })
+    // Quiz was a mode once: such discussions come back in Normal.
+    expect(chatOf(topic)).toMatchObject({ mode: 'normal', messages: [{ id: 'q' }, { id: 'a' }] })
     await new Promise((resolve) => setTimeout(resolve))
     expect(titled).toEqual(['What is a limit?'])
     expect(chatOf(topic).title).toBe('Limits')
@@ -1548,9 +1653,11 @@ describe('Workspace register', () => {
     const { ws, forgotten } = workspace()
     ws.addDoc('notes.pdf', bytes(1))
     const topic = ws.activeTopic!
-    ws.quizApi = { create: async () => written, recommend: async () => 'Review the power rule.' }
-    ws.setMode(topic.id, 'quiz')
-    await ws.ask(topic.id)
+    ws.quizApi = { recommend: async () => ({ text: 'Review the power rule.', grades: [] }) }
+    topic.draft = 'Quiz me'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'quiz' as const, quiz: structuredClone(written) }
+    })
     const quiz = chatOf(topic).messages[1]
     const key = () => discussionRequest(topic, chatOf(topic)).messages[1].key
     expect(key()).toBe(`${quiz.id}/0`)

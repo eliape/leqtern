@@ -3,6 +3,7 @@ import { tick } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import ChatPanel from './ChatPanel.svelte'
 import type { PageContext } from './context'
+import { setHideQuizChoices } from './quizMask.svelte'
 import { chatOf, Workspace } from './workspace.svelte'
 
 function setup() {
@@ -231,15 +232,13 @@ describe('ChatPanel', () => {
 
   it('shows a quiz to click through, with feedback on each answer and a summary at the end', async () => {
     const { workspace, topic, context, panel } = setup()
-    workspace.attachContext(topic.id, context, 'quiz')
+    workspace.quizOn(topic.id, context)
     await tick()
     const box = panel.getByLabelText('Ask a question')
-    expect(box.closest('form')).toHaveClass('quiz')
-    expect(box).toHaveAttribute('placeholder', 'What should the quiz cover? (optional)')
-    expect(panel.getByRole('button', { name: 'Mode: Quiz' })).toBeInTheDocument()
+    expect(box).toHaveValue('Quiz me on this')
+    expect(panel.getByRole('button', { name: 'Mode: Normal' })).toBeInTheDocument()
     let reviewed!: (text: string) => void
-    const api = {
-      create: async () => ({
+    const written = {
         title: 'Derivatives',
         questions: [
           {
@@ -251,22 +250,29 @@ describe('ChatPanel', () => {
           },
           { question: 'What is dx?', choices: ['A small change', 'A constant'], answer: 0, explanation: 'An infinitesimal.' },
         ],
-      }),
-      recommend: () => new Promise<string>((resolve) => (reviewed = resolve)),
-    }
-    await fireEvent.input(box, { target: { value: 'the power rule' } })
-    workspace.quizApi = api
-    await workspace.ask(topic.id)
+      }
+    await fireEvent.input(box, { target: { value: 'Quiz me on the power rule' } })
+    workspace.quizApi = { recommend: () => new Promise<string>((resolve) => (reviewed = resolve)).then((text) => ({ text, grades: [] })) }
+    await workspace.ask(topic.id, undefined, async function* () {
+      yield { type: 'text' as const, text: 'Here is a quiz.' }
+      yield { type: 'quiz' as const, quiz: written }
+    })
     await tick()
-    const [asked] = panel.getByRole('log').querySelectorAll('.message')
-    expect(asked).toHaveTextContent('Quiz')
-    expect(asked).toHaveTextContent('the power rule')
+    const [asked, answer] = panel.getByRole('log').querySelectorAll('.message')
+    expect(asked).toHaveTextContent('Quiz me on the power rule')
+    expect(answer).toHaveTextContent('Here is a quiz.')
+    expect(answer).toHaveClass('quiz')
 
     const quiz = within(panel.getByRole('group', { name: 'Quiz: Derivatives' }))
     expect(quiz.getByText('Question 1 of 2')).toBeInTheDocument()
     // jsdom can't style KaTeX's MathML, so these questions have no maths.
     const choices = within(quiz.getByRole('group', { name: 'Choices' })).getAllByRole('button')
     expect(choices.map((c) => c.textContent?.trim())).toEqual(['A x', 'B 2x'])
+    // The choices start covered (the default setting) and can't be picked until uncovered.
+    expect(choices[0].closest('.covered')).not.toBeNull()
+    await fireEvent.click(quiz.getByRole('button', { name: 'Click to reveal' }))
+    expect(choices[0].closest('.covered')).toBeNull()
+    expect(quiz.queryByRole('button', { name: 'Click to reveal' })).not.toBeInTheDocument()
     await fireEvent.click(choices[0])
     expect(choices[0]).toHaveClass('wrong')
     expect(choices[1]).toHaveClass('right')
@@ -279,6 +285,12 @@ describe('ChatPanel', () => {
 
     await fireEvent.click(quiz.getByRole('button', { name: 'Next question' }))
     expect(quiz.getByText('Question 2 of 2')).toBeInTheDocument()
+    // The next question's choices are covered again; turning the setting off uncovers them.
+    expect(quiz.getByRole('button', { name: 'Click to reveal' })).toBeInTheDocument()
+    setHideQuizChoices(false)
+    await tick()
+    expect(quiz.queryByRole('button', { name: 'Click to reveal' })).not.toBeInTheDocument()
+    setHideQuizChoices(true)
     await fireEvent.click(quiz.getByRole('button', { name: 'A small change' }))
     expect(quiz.getByRole('status')).toHaveTextContent('Right.')
     await fireEvent.click(quiz.getByRole('button', { name: 'See results' }))
@@ -310,6 +322,82 @@ describe('ChatPanel', () => {
     expect(quiz.queryByText('Derivative of x squared?')).not.toBeInTheDocument()
   })
 
+  it('takes a guess on the mask and a typed answer, and shows grades in the results', async () => {
+    const { workspace, topic, context, panel } = setup()
+    workspace.quizOn(topic.id, context)
+    await tick()
+    let reviewed!: () => void
+    workspace.quizApi = {
+      recommend: () =>
+        new Promise<void>((resolve) => (reviewed = resolve)).then(() => ({
+          text: 'Go over the power rule.',
+          grades: [null, { verdict: 'wrong' as const, feedback: 'The power drops by one.' }],
+        })),
+    }
+    await workspace.ask(topic.id, undefined, async function* () {
+      yield {
+        type: 'quiz' as const,
+        quiz: {
+          title: 'Powers',
+          questions: [
+            {
+              question: 'Derivative of x squared?',
+              choices: ['x', '2x'],
+              answer: 1,
+              explanation: 'The power rule.',
+              hints: ['Think of the power rule.', 'Bring the 2 down.'],
+            },
+            { kind: 'typed' as const, question: 'Derivative of x cubed?', choices: [], answer: -1, explanation: 'Again.', model_answer: '3x^2' },
+          ],
+        },
+      }
+    })
+    await tick()
+    const quiz = within(panel.getByRole('group', { name: 'Quiz: Powers' }))
+    // The lightbulb reveals the hints one at a time above the still-covered choices, the newest
+    // on top of a deck; once there are two, clicking the deck cycles through them.
+    await fireEvent.click(quiz.getByRole('button', { name: 'Show a hint' }))
+    expect(quiz.getByRole('note', { name: 'Hint' })).toHaveTextContent('Think of the power rule.')
+    await fireEvent.click(quiz.getByRole('button', { name: 'Show another hint' }))
+    const deck = () => quiz.getByRole('button', { name: /^Hint \d of 2/ })
+    expect(deck()).toHaveTextContent('Hint 2 of 2 Bring the 2 down.')
+    expect(quiz.getByRole('button', { name: 'No more hints' })).toBeDisabled()
+    await fireEvent.click(deck())
+    expect(deck()).toHaveTextContent('Hint 1 of 2 Think of the power rule.')
+    await fireEvent.click(deck())
+    expect(deck()).toHaveTextContent('Bring the 2 down.')
+    expect(quiz.getByRole('button', { name: 'Click to reveal' })).toBeInTheDocument()
+    const guess = quiz.getByLabelText('Your guess')
+    await fireEvent.input(guess, { target: { value: '2x' } })
+    // Clicking in the box does not uncover the choices; Enter does, keeping the guess.
+    await fireEvent.click(guess)
+    expect(quiz.getByRole('button', { name: 'Click to reveal' })).toBeInTheDocument()
+    await fireEvent.keyDown(guess, { key: 'Enter' })
+    expect(quiz.queryByLabelText('Your guess')).not.toBeInTheDocument()
+    await fireEvent.click(quiz.getByRole('button', { name: '2x' }))
+    expect(quiz.getByRole('status')).toHaveTextContent('Your guess 2x')
+    expect(deck()).toBeInTheDocument()
+    // The typed question has no hints, so no lightbulb.
+    await fireEvent.click(quiz.getByRole('button', { name: 'Next question' }))
+
+    expect(quiz.queryByRole('button', { name: /hint/ })).not.toBeInTheDocument()
+    const answer = quiz.getByLabelText('Your answer')
+    expect(quiz.getByRole('button', { name: 'Submit' })).toBeDisabled()
+    await fireEvent.input(answer, { target: { value: 'x^2' } })
+    await fireEvent.click(quiz.getByRole('button', { name: 'Submit' }))
+    // The model answer shows at once; grading waits for the end.
+    expect(quiz.getByRole('status')).toHaveTextContent('You wrote x^2')
+    expect(quiz.getByRole('status')).toHaveTextContent('Model answer 3x^2')
+    await fireEvent.click(quiz.getByRole('button', { name: 'See results' }))
+    expect(quiz.getByText('Grading your answers…')).toBeInTheDocument()
+    expect(quiz.getByRole('img', { name: 'You got 1 of 2 right' })).toBeInTheDocument()
+    reviewed()
+    await vi.waitFor(() => expect(quiz.getByText('Go over the power rule.')).toBeInTheDocument())
+    await fireEvent.click(quiz.getByRole('button', { name: 'Details' }))
+    expect(quiz.getByText('Not right. The power drops by one.')).toBeInTheDocument()
+    expect(quiz.getByText('Used 2 hints')).toBeInTheDocument()
+  })
+
   it('switches the mode from the menu on the left below the question box', async () => {
     const { topic, panel } = setup()
     const below = panel.getByLabelText('Ask a question').closest('form')!.nextElementSibling!
@@ -321,7 +409,7 @@ describe('ChatPanel', () => {
     await fireEvent.click(mode)
     const menu = panel.getByRole('menu', { name: 'Mode' })
     const items = within(menu).getAllByRole('menuitemradio')
-    expect(items.map((i) => i.textContent?.trim())).toEqual(['Normal', 'Socratic', 'Quiz'])
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Normal', 'Socratic'])
     expect(items[0]).toHaveAttribute('aria-checked', 'true')
     expect(items[1].querySelector('svg')).not.toBeNull()
     await fireEvent.click(items[1])

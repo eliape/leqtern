@@ -13,10 +13,13 @@ from leqtern.index import (
     DocIndex,
     DocSummary,
     Entry,
+    HeadingFix,
     Indexer,
     Section,
+    apply_heading_fixes,
     chunk_ranges,
     clamp_chunk,
+    match_capitals,
     merge_entries,
     merge_sections,
     render_outline,
@@ -42,6 +45,102 @@ def test_joins_sections_that_cross_chunk_boundaries() -> None:
         ("2.1 The chain rule", 22, 24),
     ]
     assert merged[0].summary == "Rates. Rules."
+
+
+def test_orders_sections_by_where_their_headings_are() -> None:
+    sections = [
+        Section(title="3 Tensors", level=1, start_page=13, end_page=13, top=0.4, summary=""),
+        Section(title="2.5 Regions", level=2, start_page=13, end_page=13, top=0.05, summary=""),
+        Section(title="2 Lorentz", level=1, start_page=5, end_page=12, summary=""),
+    ]
+    merged = merge_sections(sections, page_count=30)
+    assert [(s.title, s.end_page) for s in merged] == [
+        ("2 Lorentz", 13),
+        ("2.5 Regions", 13),
+        ("3 Tensors", 30),
+    ]
+
+
+def test_drops_headings_marked_as_continued() -> None:
+    sections = [
+        Section(title="Exercises III", level=2, start_page=40, end_page=40, summary=""),
+        Section(title="Exercises III (continued)", level=1, start_page=41, end_page=42, summary=""),
+        Section(title="Continued fractions", level=2, start_page=43, end_page=44, summary=""),
+    ]
+    assert [s.title for s in merge_sections(sections)] == ["Exercises III", "Continued fractions"]
+
+
+def test_drops_single_exercises_and_running_headers() -> None:
+    def sec(title: str, level: int, page: int) -> Section:
+        return Section(title=title, level=level, start_page=page, end_page=page, summary="")
+
+    sections = [
+        sec("3 Solutions", 1, 50),
+        sec("3.1 Solutions to Problems in Special Relativity Theory", 2, 50),
+        sec("3.1 Solutions to Problems in Special Relativity Theory", 2, 52),
+        sec("Problem 1.12", 3, 51),
+        sec("3.2 Solutions to Problems in General Relativity Theory", 2, 60),
+        sec("2.47", 3, 61),
+        sec("Problem 2.48: Geodesics", 3, 62),
+        sec("3.2 Solutions to Problems in General Relativity Theory", 2, 63),
+        sec("Exercises", 2, 64),
+        sec("4 Cosmology", 1, 70),
+        sec("Exercises", 2, 80),
+    ]
+    assert [(s.title, s.start_page) for s in merge_sections(sections)] == [
+        ("3 Solutions", 50),
+        ("3.1 Solutions to Problems in Special Relativity Theory", 50),
+        ("3.2 Solutions to Problems in General Relativity Theory", 60),
+        ("Exercises", 64),
+        ("4 Cosmology", 70),
+        ("Exercises", 80),
+    ]
+
+
+def test_keeps_problems_that_are_the_top_level() -> None:
+    sections = [
+        Section(title=f"Problem {n}", level=1, start_page=n, end_page=n, summary="")
+        for n in (1, 2, 3)
+    ]
+    assert len(merge_sections(sections)) == 3
+
+
+def test_capitalises_a_lower_case_heading_like_the_others() -> None:
+    sections = [
+        Section(title=t, level=1, start_page=n, end_page=n, summary="")
+        for n, t in enumerate(
+            [
+                "1 Special Relativity",
+                "2 Tensor Algebra",
+                "3 the theory of gravitation",
+                "4 Black Holes",
+            ]
+        )
+    ]
+    sections.append(Section(title="4.1 the horizon", level=2, start_page=9, end_page=9, summary=""))
+    match_capitals(sections)
+    assert sections[2].title == "3 The Theory of Gravitation"
+    assert sections[4].title == "4.1 the horizon"  # nothing to compare it with
+
+
+def test_applies_heading_fixes_from_the_summary() -> None:
+    sections = [
+        Section(title="III. Relativistic Optics", level=1, start_page=1, end_page=1, summary=""),
+        Section(title="IV SPACETIME", level=1, start_page=2, end_page=2, summary=""),
+        Section(title="Exercises IV", level=1, start_page=3, end_page=3, summary=""),
+    ]
+    apply_heading_fixes(
+        sections,
+        [
+            HeadingFix(title="IV SPACETIME", new_title="IV. Spacetime", level=1),
+            HeadingFix(title="exercises iv", new_title="Exercises IV", level=2),
+        ],
+    )
+    assert [(s.title, s.level) for s in sections] == [
+        ("III. Relativistic Optics", 1),
+        ("IV. Spacetime", 1),
+        ("Exercises IV", 2),
+    ]
 
 
 def test_merges_entries_by_kind_and_name() -> None:
@@ -114,7 +213,10 @@ async def test_indexes_a_document_with_text_and_scanned_pages(library, tmp_path)
     calls = usage.summary()
     assert calls["index_chunk"]["calls"] == 2
     assert calls["index_chunk"]["image_pages"] == 1
-    assert indexer.doc_status(doc.id)["status"] == "ready"
+    status = indexer.doc_status(doc.id)
+    assert status["status"] == "ready"
+    # The title and kind go with it, for the sidebar's card.
+    assert (status["title"], status["kind"]) == (index.title, index.kind)
     # Saved: a new indexer finds it without indexing again.
     assert Indexer(library, usage, lambda: None).doc_status(doc.id)["status"] == "ready"
     assert "Part 21 [pp. 21–24]" in render_outline(doc, index)
