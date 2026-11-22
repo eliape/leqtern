@@ -13,6 +13,10 @@
     startPage?: number
     /** Called as the reader moves to another page, so it can be saved. */
     onpagechange?: (page: number) => void
+    /** The zoom to open at (see PdfViewer). */
+    startZoom?: number
+    /** Called when the reader zooms by hand (see PdfViewer). */
+    onzoomchange?: (zoom: number | undefined) => void
     /** Called as the reader scrolls, with the page and spot on it being read. */
     onreadingspot?: (spot: ReadingSpot) => void
     /** Whether this is the open tab. Only the open tab's controls are shown. */
@@ -41,6 +45,8 @@
     data,
     startPage,
     onpagechange,
+    startZoom,
+    onzoomchange,
     onreadingspot,
     active = true,
     controlsTarget,
@@ -66,6 +72,7 @@
 
   // Only the page it first opened at: later changes come from this tab's own scrolling.
   const openAt = untrack(() => startPage)
+  const openZoom = untrack(() => startZoom)
 
   // Keep the page box in sync while scrolling, and report the page.
   $effect(() => {
@@ -204,6 +211,8 @@
     {data}
     bind:page
     startPage={openAt}
+    startZoom={openZoom}
+    {onzoomchange}
     bind:pageCount
     bind:scale
     {marker}

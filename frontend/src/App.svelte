@@ -906,6 +906,11 @@
               onpagechange={(page) => {
                 workspace.pages[id] = page
               }}
+              startZoom={workspace.zooms[id]}
+              onzoomchange={(zoom) => {
+                if (zoom) workspace.zooms[id] = zoom
+                else delete workspace.zooms[id]
+              }}
               onreadingspot={(spot) => {
                 reading[id] = spot
               }}

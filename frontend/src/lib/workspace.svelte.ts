@@ -198,6 +198,8 @@ export type SavedDoc = {
   renamed?: boolean
   serverId: string
   page?: number
+  /** The zoom the reader chose (1 is 100%), if they zoomed by hand. */
+  zoom?: number
 }
 
 /**
@@ -290,6 +292,8 @@ export class Workspace {
   indexing = $state<Record<string, IndexState>>({})
   /** The page each tab was last on, so it opens there next time. */
   pages = $state<Record<string, number>>({})
+  /** The zoom each source was last given by hand (1 is 100%). Sources without one fit their page width. */
+  zooms = $state<Record<string, number>>({})
   /** Why a tab's PDF can't be shown (it could not be fetched or opened), by tab id. */
   pdfErrors = $state<Record<string, string>>({})
   /** Where saved tabs' PDFs come from. Tests swap in a fake. */
@@ -407,6 +411,7 @@ export class Workspace {
     for (const docId of topic.docIds) {
       delete this.indexing[docId]
       delete this.pages[docId]
+      delete this.zooms[docId]
       delete this.pdfErrors[docId]
     }
     for (const serverId of serverIds) this.release(serverId)
@@ -1090,6 +1095,7 @@ export class Workspace {
     this.docs = omit(this.docs, [id])
     delete this.indexing[id]
     delete this.pages[id]
+    delete this.zooms[id]
     delete this.pdfErrors[id]
     this.release(serverId)
   }
@@ -1152,8 +1158,9 @@ export class Workspace {
         const docs = topic.docIds.flatMap((id): SavedDoc[] => {
           const serverId = this.indexing[id]?.serverId
           const page = this.pages[id]
+          const zoom = this.zooms[id]
           const { name, renamed } = this.docs[id]
-          return serverId ? [{ id, name, serverId, ...(renamed && { renamed }), ...(page > 1 && { page }) }] : []
+          return serverId ? [{ id, name, serverId, ...(renamed && { renamed }), ...(page > 1 && { page }), ...(zoom && { zoom }) }] : []
         })
         return {
           id: topic.id,
@@ -1186,14 +1193,17 @@ export class Workspace {
     const docs: Record<string, Doc> = {}
     const indexing: Record<string, IndexState> = {}
     const pages: Record<string, number> = {}
+    const zooms: Record<string, number> = {}
     for (const d of saved.topics.flatMap((t) => t.docs)) {
       docs[d.id] = { id: d.id, name: d.name, ...(d.renamed && { renamed: true }) }
       indexing[d.id] = { serverId: d.serverId, status: 'queued', pagesDone: 0, pageCount: 0 }
       if (d.page) pages[d.id] = d.page
+      if (typeof d.zoom === 'number' && d.zoom > 0) zooms[d.id] = d.zoom
     }
     this.docs = { ...docs, ...this.docs }
     this.indexing = { ...indexing, ...this.indexing }
     this.pages = { ...pages, ...this.pages }
+    this.zooms = { ...zooms, ...this.zooms }
     const restored = saved.topics.map((t): Topic => {
       const docIds = t.docs.map((d) => d.id).filter((id) => id in docs)
       const openDocIds = t.open ? t.open.filter((id) => docIds.includes(id)) : docIds

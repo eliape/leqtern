@@ -19,6 +19,13 @@
     page?: number
     /** The page to open the PDF at, e.g. where the reader was last time. */
     startPage?: number
+    /** The zoom to open at, where the reader left it last time. Without one the page is fitted. */
+    startZoom?: number
+    /**
+     * Called when the reader zooms by hand, with the new zoom, or undefined when they fit the
+     * width again. Zooming that follows the chat is not reported, so the chosen zoom is kept.
+     */
+    onzoomchange?: (zoom: number | undefined) => void
     pageCount?: number
     /** Current zoom, where 1 is 100%. */
     scale?: number
@@ -64,6 +71,8 @@
     data,
     page = $bindable(1),
     startPage = 1,
+    startZoom,
+    onzoomchange,
     pageCount = $bindable(0),
     scale = $bindable(1),
     marker,
@@ -93,7 +102,8 @@
       linkService.setViewer(pdfViewer)
       // Fit new documents to the window width, like most PDF readers.
       eventBus.on('pagesinit', () => {
-        if (followChat) openBesideChat(pdfViewer)
+        if (startZoom) openAtZoom(pdfViewer, startZoom)
+        else if (followChat) openBesideChat(pdfViewer)
         else fitWidth(pdfViewer)
         if (startPage > 1 && startPage <= pdfViewer.pagesCount) pdfViewer.currentPageNumber = startPage
       })
@@ -146,6 +156,17 @@
       shrunk = undefined
       pdfViewer.currentScale = start
     }
+  }
+
+  /** Open at the reader's own zoom; if the chat is open and it follows the chat, shrunk to fit beside it. */
+  function openAtZoom(pdfViewer: PDFViewer, zoom: number) {
+    shrunk = undefined
+    const room = chatReserve()
+    if (followChat && chatOpen && room) {
+      const fit = fitScale(pdfViewer, container.clientWidth)
+      if (zoom > fit + 0.005) shrunk = { from: zoom, to: fit }
+    }
+    pdfViewer.currentScale = shrunk?.to ?? zoom
   }
 
   // Follow the chat opening and closing (not the first value: openBesideChat sees to that).
@@ -272,6 +293,7 @@
     if (!viewer) return
     target = Math.min(25, Math.max(0.1, (target ?? viewer.currentScale) * factor))
     viewer.updateScale({ scaleFactor: target / viewer.currentScale, origin, drawingDelay: 120 })
+    onzoomchange?.(target)
     clearTimeout(targetTimer)
     targetTimer = setTimeout(() => (target = undefined), 200)
   }
@@ -529,15 +551,27 @@
   }
   export function zoomIn() {
     viewer?.increaseScale()
+    zoomedByHand()
   }
   export function zoomOut() {
     viewer?.decreaseScale()
+    zoomedByHand()
+  }
+  /** Report a zoom the reader chose, so it is there next time the PDF opens. */
+  function zoomedByHand() {
+    if (viewer) onzoomchange?.(viewer.currentScale)
   }
   /** Set zoom to a number (1 = 100%) or a PDF.js preset like 'page-width' or 'page-fit'. */
   export function setZoom(value: number | 'page-width' | 'page-fit' | 'auto') {
     if (!viewer) return
-    if (value === 'page-width') fitWidth(viewer)
-    else viewer.currentScaleValue = String(value)
+    if (value === 'page-width') {
+      // Back to the default: fitted to the width (and following the chat, if it does).
+      fitWidth(viewer)
+      onzoomchange?.(undefined)
+    } else {
+      viewer.currentScaleValue = String(value)
+      zoomedByHand()
+    }
   }
 </script>
 
