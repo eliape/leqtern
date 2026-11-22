@@ -610,7 +610,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /^Actions for a/ })).toBeInTheDocument()
   })
 
-  it('reorders tabs by dragging one onto another', async () => {
+  it('reorders tabs by dragging one, the others sliding aside as it passes them', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))
     await pick(pdf('b.pdf', 'b'))
@@ -619,27 +619,41 @@ describe('App', () => {
     expect(tabs()).toEqual(['a.pdf', 'b.pdf'])
     const first = screen.getByRole('tab', { name: 'a.pdf' }).parentElement!
     const second = screen.getByRole('tab', { name: 'b.pdf' }).parentElement!
-    const data = new Map<string, string>()
-    const dragImages: Element[] = []
-    const dataTransfer = {
-      setData: (k: string, v: string) => data.set(k, v),
-      setDragImage: (el: Element) => dragImages.push(el),
-      types: [],
-      dropEffect: '',
-      effectAllowed: '',
+    // jsdom has no layout: two 100px tabs side by side.
+    for (const [el, left] of [[first, 0], [second, 100]] as const) {
+      Object.defineProperty(el, 'offsetLeft', { configurable: true, value: left })
+      Object.defineProperty(el, 'offsetWidth', { configurable: true, value: 100 })
     }
-    await fireEvent.dragStart(first, { dataTransfer })
-    // A card with the PDF's name is carried along, and a line shows where the tab will land.
-    expect(dragImages).toHaveLength(1)
-    expect(dragImages[0].textContent).toBe('a.pdf')
-    await fireEvent.dragOver(second, { dataTransfer, clientX: 10_000 })
-    expect(document.querySelector('.drop-line')).toBeInTheDocument()
-    // Once the drag has started, the PDF and chat stop taking the pointer, so nothing auto-scrolls.
-    await waitFor(() => expect(document.querySelector('.app')).toHaveClass('tab-dragging'))
-    await fireEvent.drop(second, { dataTransfer })
-    expect(tabs()).toEqual(['b.pdf', 'a.pdf'])
-    expect(document.querySelector('.drop-line')).not.toBeInTheDocument()
+    await fireEvent.pointerDown(first, { clientX: 50, button: 0 })
+    await fireEvent.pointerMove(window, { clientX: 130 })
+    // The dragged tab follows the pointer; the other slides aside once it is passed halfway.
+    expect(first.style.transform).toBe('translateX(80px)')
+    expect(second.style.transform).toBe('')
+    await fireEvent.pointerMove(window, { clientX: 400 })
+    expect(first.style.transform).toBe('translateX(100px)')
+    expect(second.style.transform).toBe('translateX(-100px)')
+    expect(document.querySelector('.app')).toHaveClass('tab-dragging')
+    await fireEvent.pointerUp(window, { clientX: 400 })
+    // The release doesn't click the tab under the pointer.
+    expect(screen.getByRole('tab', { name: 'b.pdf' })).toHaveAttribute('aria-selected', 'true')
+    await fireEvent.click(screen.getByRole('tab', { name: 'a.pdf' }))
+    expect(screen.getByRole('tab', { name: 'b.pdf' })).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(tabs()).toEqual(['b.pdf', 'a.pdf']))
     expect(document.querySelector('.app')).not.toHaveClass('tab-dragging')
+    expect(first.style.transform).toBe('')
+  })
+
+  it('cancels a tab drag with Escape, leaving the order as it was', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    const first = screen.getByRole('tab', { name: 'a.pdf' }).parentElement!
+    await fireEvent.pointerDown(first, { clientX: 50, button: 0 })
+    await fireEvent.pointerMove(window, { clientX: 130 })
+    await fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('.app')).not.toHaveClass('tab-dragging'))
+    expect(screen.getAllByRole('tab').map((t) => t.textContent?.trim())).toEqual(['a.pdf', 'b.pdf'])
   })
 
   it('has no Open PDF button, and shows the open tab\'s controls in the tab row', async () => {

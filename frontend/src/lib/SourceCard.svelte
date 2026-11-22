@@ -80,7 +80,8 @@
 <style>
   .source-card {
     position: fixed;
-    z-index: 40;
+    /* Under the sidebar (30) and the tab row (26), so it slides out from beneath them. */
+    z-index: 25;
     /* Always this wide: a long title wraps rather than widening the card. */
     box-sizing: border-box;
     width: 16rem;
@@ -95,14 +96,30 @@
   .source-card.right {
     transform: translateY(-50%);
     transition: top 0.15s ease;
+    animation: card-in-right 0.15s ease-out;
   }
   /* Below a tab, sliding along the row from one tab to the next. */
   .source-card.below {
     transition: left 0.15s ease;
+    animation: card-in-below 0.15s ease-out;
+  }
+  /* On appearing, it starts 90% in place and fades in: from the sidebar's side, or from the tab row. */
+  @keyframes card-in-right {
+    from {
+      opacity: 0;
+      transform: translate(-10%, -50%);
+    }
+  }
+  @keyframes card-in-below {
+    from {
+      opacity: 0;
+      transform: translateY(-10%);
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     .source-card {
       transition: none;
+      animation: none !important;
     }
   }
   .source-title {
