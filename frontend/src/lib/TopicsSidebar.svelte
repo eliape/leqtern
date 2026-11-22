@@ -260,9 +260,7 @@
                 type="button"
                 class="topic"
                 aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
-                title="Double-click to rename"
                 onclick={() => workspace.selectTopic(topic.id)}
-                ondblclick={() => startRename(topic.id, topic.name)}
               >
                 <span class="name" use:marquee><span>{topic.name}</span></span>
                 <span class="count">{topic.docIds.length}</span>
