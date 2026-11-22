@@ -110,6 +110,12 @@
     if (!expanded || menuId) closeCard()
   })
   $effect(() => clearCardTimers)
+  /** The page count after the kind, once known. While indexing, the kind line already counts pages. */
+  function pagesLabel(id: string): string {
+    const state = workspace.indexing[id]
+    if (!state?.pageCount || state.status === 'indexing') return ''
+    return ` · ${state.pageCount} ${state.pageCount === 1 ? 'page' : 'pages'}`
+  }
   function kindLabel(id: string): string {
     const state = workspace.indexing[id]
     if (state?.kind) return state.kind[0].toUpperCase() + state.kind.slice(1)
@@ -238,7 +244,7 @@
     <h1>Leqtern</h1>
   </div>
 
-  <button type="button" class="new" aria-label="New topic" onclick={newTopic}>
+  <button type="button" class="new new-topic" aria-label="New topic" onclick={newTopic}>
     <span class="plus" aria-hidden="true">＋</span>
     <span>New topic</span>
   </button>
@@ -597,7 +603,7 @@
   {@const doc = workspace.docs[hoverCard.id]}
   <div class="source-card" role="tooltip" style:top="{hoverCard.top}px" style:left="{hoverCard.left}px">
     <div class="source-title">{(!doc.renamed && workspace.indexing[hoverCard.id]?.title) || doc.name}</div>
-    <div class="source-kind">{kindLabel(hoverCard.id)}</div>
+    <div class="source-kind">{kindLabel(hoverCard.id)}{pagesLabel(hoverCard.id)}</div>
   </div>
 {/if}
 
@@ -677,8 +683,9 @@
     backdrop-filter: none;
     box-shadow: none;
   }
+  /* Starts nearly in place, so it only slides the last bit as it fades in. */
   .topics-sidebar.closed {
-    transform: translateX(-100%);
+    transform: translateX(-10%);
     opacity: 0;
     visibility: hidden;
     box-shadow: none;
@@ -738,6 +745,10 @@
     overflow: hidden;
     text-align: left;
   }
+  /* As far below the top bar as the Topics heading is below it. */
+  .new-topic {
+    margin-top: 0.375rem;
+  }
   .plus {
     flex-shrink: 0;
     width: var(--icon-cell);
@@ -772,7 +783,7 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted);
-    margin: 0.75rem 0.5rem 0.25rem;
+    margin: 0.25rem 0.5rem 0.25rem;
   }
 
   .hint {

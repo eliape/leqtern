@@ -128,7 +128,7 @@
   let sidebarPeek = $state(false)
   const sidebarOpen = $derived(sidebarPinned || sidebarPeek)
   let peekTimer: ReturnType<typeof setTimeout> | undefined
-  const PEEK_GRACE_MS = 300
+  const PEEK_GRACE_MS = 200
   function hoverSidebar(inside: boolean) {
     clearTimeout(peekTimer)
     if (inside) {
@@ -674,6 +674,7 @@
     aria-label={sidebarPinned ? 'Hide topics' : 'Show topics'}
     aria-expanded={sidebarPinned}
     aria-controls="topics-sidebar"
+    title={sidebarPinned ? 'Hide sidebar' : 'Show sidebar'}
     onclick={togglePin}
     onpointerenter={() => hoverSidebar(true)}
     onpointerleave={() => hoverSidebar(false)}
