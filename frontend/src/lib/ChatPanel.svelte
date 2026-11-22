@@ -893,14 +893,9 @@
   }
 
   /* With no box, a Socratic answer is marked by a coloured line down its left, matching the question box's shade in that mode. */
-  .message.socratic,
-  .message.quiz {
+  .message.socratic {
     padding-left: 0.75rem;
     box-shadow: inset 2px 0 0 var(--socratic);
-  }
-  /* A quiz's line has the quiz colour. */
-  .message.quiz {
-    box-shadow: inset 2px 0 0 var(--quiz);
   }
   /* A session or a quiz may start with nothing typed, so its message says what it is. */
   .session-start {
