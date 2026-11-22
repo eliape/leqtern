@@ -132,20 +132,42 @@
   const sidebarOpen = $derived(sidebarPinned || sidebarPeek)
   let peekTimer: ReturnType<typeof setTimeout> | undefined
   const PEEK_GRACE_MS = 200
+  // A panel opened from the sidebar (Settings, Scope and conventions, …) covers it, which counts
+  // as the pointer leaving. The sidebar stays behind the panel instead, and once the panel is
+  // closed the countdown starts with the pointer's next move, unless that move is over the sidebar.
+  const panelOpen = () => !!document.querySelector('[aria-modal="true"]')
+  let awaitMove: ((e: PointerEvent) => void) | undefined
+  function stopAwaitingMove() {
+    if (awaitMove) window.removeEventListener('pointermove', awaitMove)
+    awaitMove = undefined
+  }
+  function hideAfterNextMove() {
+    stopAwaitingMove()
+    awaitMove = (e: PointerEvent) => {
+      if (panelOpen()) return
+      stopAwaitingMove()
+      if (!(e.target as Element | null)?.closest?.('#topics-sidebar, .sidebar-toggle')) hoverSidebar(false)
+    }
+    window.addEventListener('pointermove', awaitMove)
+  }
   function hoverSidebar(inside: boolean) {
     clearTimeout(peekTimer)
     if (inside) {
+      stopAwaitingMove()
       sidebarPeek = true
       return
     }
+    if (panelOpen()) return hideAfterNextMove()
     peekTimer = setTimeout(() => {
       // Not while a name is being typed in it: the box would lose what was typed.
       if (document.querySelector('#topics-sidebar input:focus')) return
+      if (panelOpen()) return hideAfterNextMove()
       sidebarPeek = false
     }, PEEK_GRACE_MS)
   }
   function hideSidebarPeek() {
     clearTimeout(peekTimer)
+    stopAwaitingMove()
     sidebarPeek = false
   }
   function togglePin() {
@@ -158,7 +180,10 @@
       // Not remembered, then.
     }
   }
-  $effect(() => () => clearTimeout(peekTimer))
+  $effect(() => () => {
+    clearTimeout(peekTimer)
+    stopAwaitingMove()
+  })
   let settingsOpen = $state(false)
   // Whether the PDF's zoom follows the chat opening and closing. Set in Settings.
   let zoomFollowsChat = $state(savedZoomFollowsChat())
@@ -306,8 +331,11 @@
       const min = -lefts[from]
       const max = lefts[lefts.length - 1] + widths[widths.length - 1] - (lefts[from] + widths[from])
       dragDx = Math.max(min, Math.min(max, dx))
-      const centre = lefts[from] + widths[from] / 2 + dragDx
-      dragTo = lefts.filter((l, i) => i !== from && l + widths[i] / 2 <= centre).length
+      // A tab is passed once the dragged tab's leading edge crosses its middle, so the first and
+      // last places are reachable even though the tab can't leave the row.
+      const left = lefts[from] + dragDx
+      const right = left + widths[from]
+      dragTo = lefts.filter((l, i) => i !== from && (i < from ? left > l + widths[i] / 2 : right > l + widths[i] / 2)).length
     }
     const stop = (drop: boolean) => {
       window.removeEventListener('pointermove', move)
@@ -708,7 +736,8 @@
   onpointerdown={(e) => {
     // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) ends a peek. Pinned, it stays.
     const target = e.target as Element
-    if (!target.closest('#topics-sidebar, .sidebar-toggle, .settings-dialog, .topic-profile-dialog, .flashcard-dialog, .flashcard-manager')) {
+    // Nor does a press while a panel is open, such as on its dimmed backdrop to close it.
+    if (!panelOpen() && !target.closest('#topics-sidebar, .sidebar-toggle')) {
       hideSidebarPeek()
     }
     // The outline closes too, unless the press is in it or on its button.
