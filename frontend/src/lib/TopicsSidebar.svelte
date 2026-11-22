@@ -751,6 +751,8 @@
     align-items: center;
     min-height: var(--row-height);
     padding-block: 0;
+    /* The name starts level with the + of New topic and the arrows of Discussions and Sources. */
+    padding-left: 0.7rem;
   }
 
   .name {
