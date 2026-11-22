@@ -127,7 +127,7 @@
     gap: 0.3rem;
     padding: 0.15rem 0.35rem 0.15rem 0.4rem;
     border: none;
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
     background: none;
     color: var(--dropdown-color, var(--muted));
     font: inherit;
