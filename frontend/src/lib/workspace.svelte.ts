@@ -326,6 +326,18 @@ export class Workspace {
     if (topic && name.trim()) topic.name = name.trim()
   }
 
+  /** Give a discussion a name of its own. Haiku no longer names it after that. */
+  renameChat(topicId: string, chatId: string, name: string) {
+    const chat = this.topics.find((t) => t.id === topicId)?.chats.find((c) => c.id === chatId)
+    if (chat && name.trim()) chat.title = name.trim()
+  }
+
+  /** Rename a source: the sidebar, its tab and the model all go by the new name. */
+  renameDoc(id: string, name: string) {
+    const doc = this.docs[id]
+    if (doc && name.trim()) this.docs = { ...this.docs, [id]: { ...doc, name: name.trim() } }
+  }
+
   /** Put a topic away in the Archive. If it was open, the next topic that is not archived is. */
   archiveTopic(id: string) {
     const topic = this.topics.find((t) => t.id === id)
@@ -947,7 +959,8 @@ export class Workspace {
       })
       // A discussion deleted meanwhile is no longer in its topic; the title just goes nowhere.
       // A question taken back (its answer stopped) no longer names the discussion.
-      if (title && chat.messages.some((m) => m.id === asked.id)) chat.title = title
+      // A name given by hand meanwhile stands.
+      if (title && !chat.title && chat.messages.some((m) => m.id === asked.id)) chat.title = title
     } catch {
       // Without a title, the start of the question stands in.
     }
