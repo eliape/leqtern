@@ -555,6 +555,7 @@
   .topics-sidebar {
     /* The plus and the icons below it sit in a cell this wide, under the sidebar button in the corner. */
     --icon-cell: 2.25rem;
+    --row-height: 2.125rem;
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
@@ -642,14 +643,18 @@
     flex-shrink: 0;
     align-items: center;
     width: 100%;
-    height: 2.125rem;
+    /* The same height and text size as a topic row (see li > .topic). */
+    height: var(--row-height);
     padding: 0;
     overflow: hidden;
+    font-size: 0.85rem;
     text-align: left;
   }
-  /* As far below the top bar as the Topics heading is below it. */
+  /* A little below the top bar. */
   .new-topic {
     margin-top: 0.375rem;
+    /* Set a little apart from the topics below it. */
+    margin-bottom: 0.625rem;
   }
   .plus {
     flex-shrink: 0;
@@ -660,7 +665,6 @@
   .settings {
     flex-shrink: 0;
     margin-top: auto;
-    font-size: 0.9rem;
   }
   .settings .plus {
     display: grid;
@@ -740,6 +744,13 @@
     font-size: 0.85rem;
     text-align: left;
     cursor: pointer;
+  }
+
+  /* A topic's row is as tall as New topic and Settings. */
+  li > .topic {
+    align-items: center;
+    min-height: var(--row-height);
+    padding-block: 0;
   }
 
   .name {
@@ -843,6 +854,13 @@
     margin-block: 0;
     padding: 0 0 0.375rem 0.875rem;
     font-weight: normal;
+  }
+  /* Sources follows Discussions closely: the two read as one block under the topic. */
+  li.discussions:has(+ li.sources) {
+    padding-bottom: 0;
+  }
+  li.sources h3 {
+    margin-top: 0.125rem;
   }
   li.discussions:hover {
     background: none;
