@@ -99,7 +99,6 @@
   }
   .title {
     font-weight: 600;
-    color: var(--hint);
   }
   .progress {
     font-size: 0.8rem;
@@ -137,7 +136,7 @@
     gap: 0.35rem;
     min-height: 5.5rem;
     padding: 0.65rem 0.8rem;
-    border: 1px solid color-mix(in srgb, var(--hint) 40%, var(--border));
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
     box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
@@ -165,12 +164,12 @@
     background: repeating-linear-gradient(
         135deg,
         transparent 0 10px,
-        color-mix(in srgb, var(--hint) 6%, transparent) 10px 20px
+        color-mix(in srgb, var(--muted) 6%, transparent) 10px 20px
       ),
-      color-mix(in srgb, var(--hint) 8%, var(--surface));
+      color-mix(in srgb, var(--muted) 6%, var(--surface));
   }
   .back:hover {
-    border-color: var(--hint);
+    border-color: var(--muted);
   }
   .back:focus-visible {
     outline: 2px solid var(--accent);
@@ -179,7 +178,7 @@
   .number {
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--hint);
+    color: var(--muted);
   }
   .cta {
     font-weight: 600;
@@ -241,13 +240,13 @@
     width: 0.45rem;
     height: 0.45rem;
     border-radius: 50%;
-    border: 1px solid color-mix(in srgb, var(--hint) 60%, var(--border));
+    border: 1px solid var(--border);
   }
   .dot.seen {
-    background: color-mix(in srgb, var(--hint) 55%, transparent);
+    background: color-mix(in srgb, var(--muted) 45%, transparent);
   }
   .dot.current {
-    background: var(--hint);
-    border-color: var(--hint);
+    background: var(--muted);
+    border-color: var(--muted);
   }
 </style>

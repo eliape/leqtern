@@ -373,10 +373,9 @@
     gap: 0.1rem;
     width: 100%;
     padding: 0.4rem 0.6rem;
-    border: 1px solid color-mix(in srgb, var(--quiz) 35%, var(--border));
-    border-left: 3px solid var(--quiz);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: color-mix(in srgb, var(--quiz) 8%, var(--surface));
+    background: var(--surface);
     color: inherit;
     font: inherit;
     font-size: 0.9em;
@@ -384,15 +383,15 @@
     /* The cards behind, as edges peeking out below. */
     box-shadow:
       0 calc(min(var(--behind), 1) * 0.4rem) 0 calc(min(var(--behind), 1) * -0.3rem)
-        color-mix(in srgb, var(--quiz) 16%, var(--surface)),
+        color-mix(in srgb, var(--muted) 10%, var(--surface)),
       0 calc(min(var(--behind), 1) * 0.4rem) 0 calc(min(var(--behind), 1) * -0.24rem)
-        color-mix(in srgb, var(--quiz) 40%, var(--border));
+        var(--border);
   }
   button.hint {
     cursor: pointer;
   }
   button.hint:hover {
-    background: color-mix(in srgb, var(--quiz) 13%, var(--surface));
+    background: var(--hover);
   }
   button.hint:focus-visible {
     outline: 2px solid var(--accent);
@@ -401,7 +400,7 @@
   .hint-number {
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--quiz);
+    color: var(--muted);
   }
   .progress {
     flex-shrink: 0;
@@ -558,7 +557,7 @@
   }
   .grade.partly,
   .mark.partly {
-    color: var(--quiz);
+    color: var(--partly);
   }
   .muted-note {
     margin: 0;
@@ -599,13 +598,16 @@
   .next {
     align-self: flex-start;
     padding: 0.3rem 0.75rem;
-    border: none;
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--quiz);
-    color: #fff;
+    background: var(--surface);
+    color: inherit;
     font: inherit;
     font-weight: 600;
     cursor: pointer;
+  }
+  .next:hover:not(:disabled) {
+    background: var(--hover);
   }
 
   .score {
@@ -701,9 +703,9 @@
   .advice {
     margin: 0;
     padding: 0.5rem 0.6rem;
-    border-left: 3px solid var(--quiz);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: color-mix(in srgb, var(--quiz) 8%, transparent);
+    background: var(--surface);
   }
   .advice.muted {
     color: var(--muted);
@@ -713,6 +715,6 @@
     margin-bottom: 0.15rem;
     font-size: 0.75rem;
     font-weight: 600;
-    color: var(--quiz);
+    color: var(--muted);
   }
 </style>
