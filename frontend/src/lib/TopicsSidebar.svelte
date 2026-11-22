@@ -110,6 +110,12 @@
     if (!expanded || menuId) closeCard()
   })
   $effect(() => clearCardTimers)
+  /** The page count after the kind, once known. While indexing, the kind line already counts pages. */
+  function pagesLabel(id: string): string {
+    const state = workspace.indexing[id]
+    if (!state?.pageCount || state.status === 'indexing') return ''
+    return ` · ${state.pageCount} ${state.pageCount === 1 ? 'page' : 'pages'}`
+  }
   function kindLabel(id: string): string {
     const state = workspace.indexing[id]
     if (state?.kind) return state.kind[0].toUpperCase() + state.kind.slice(1)
@@ -597,7 +603,7 @@
   {@const doc = workspace.docs[hoverCard.id]}
   <div class="source-card" role="tooltip" style:top="{hoverCard.top}px" style:left="{hoverCard.left}px">
     <div class="source-title">{(!doc.renamed && workspace.indexing[hoverCard.id]?.title) || doc.name}</div>
-    <div class="source-kind">{kindLabel(hoverCard.id)}</div>
+    <div class="source-kind">{kindLabel(hoverCard.id)}{pagesLabel(hoverCard.id)}</div>
   </div>
 {/if}
 
