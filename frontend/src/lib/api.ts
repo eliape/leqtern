@@ -158,6 +158,9 @@ export type IndexStatus = {
   pages_done: number
   page_count: number
   error?: string
+  /** From the index, once it is ready: the document's own title and what kind of document it is. */
+  title?: string
+  kind?: string
 }
 
 /** Give the backend a PDF to keep and index. Adding the same file again is cheap: it is stored once. */

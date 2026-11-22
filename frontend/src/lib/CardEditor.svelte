@@ -67,7 +67,6 @@
             class:empty={!card[side.field].trim()}
             role="button"
             tabindex="0"
-            title="Click to edit"
             onclick={() => edit(side.field)}
             onkeydown={(e) => onSideKeydown(e, side.field)}
           >

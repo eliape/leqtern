@@ -213,7 +213,10 @@ async def test_indexes_a_document_with_text_and_scanned_pages(library, tmp_path)
     calls = usage.summary()
     assert calls["index_chunk"]["calls"] == 2
     assert calls["index_chunk"]["image_pages"] == 1
-    assert indexer.doc_status(doc.id)["status"] == "ready"
+    status = indexer.doc_status(doc.id)
+    assert status["status"] == "ready"
+    # The title and kind go with it, for the sidebar's card.
+    assert (status["title"], status["kind"]) == (index.title, index.kind)
     # Saved: a new indexer finds it without indexing again.
     assert Indexer(library, usage, lambda: None).doc_status(doc.id)["status"] == "ready"
     assert "Part 21 [pp. 21–24]" in render_outline(doc, index)

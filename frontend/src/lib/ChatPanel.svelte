@@ -162,11 +162,6 @@
     return c.messages[index].mode === 'socratic' && before?.mode !== 'socratic'
   }
 
-  function chipTitle(context: PageContext) {
-    const what = context.selection ? 'Selected text' : context.point ? 'Clicked spot' : 'Page'
-    return `${what} on ${contextLabel(context)} of ${context.docName}. Click to show it.`
-  }
-
   // Follow the newest message, also while an answer streams in, but only while the reader is at
   // the bottom: scrolling up to read stops the following, and scrolling back down resumes it.
   // Any move upwards counts, even inside the bottom margin, because the follow's own jumps to the
@@ -349,7 +344,6 @@
     aria-valuenow={width}
     aria-valuemin={MIN_WIDTH}
     tabindex="0"
-    title="Drag to resize. Double-click to reset."
     onpointerdown={startResize}
     ondblclick={() => setWidth(DEFAULT_WIDTH)}
     onkeydown={onHandleKeydown}
@@ -362,7 +356,6 @@
         <button
           type="button"
           class="new-chat"
-          title="Start a new discussion in this topic"
           disabled={!chat?.messages.length}
           onclick={() => {
             if (!topic) return
@@ -397,12 +390,11 @@
             {:else if message.role === 'user' && startsSession(chat, index)}
               <span class="session-start">Socratic session</span>
             {/if}
-            {#if message.quote}<blockquote class="quoted" title={message.quote}>{message.quote}</blockquote>{/if}
+            {#if message.quote}<blockquote class="quoted">{message.quote}</blockquote>{/if}
             {#if message.context && pointedAt(message.context)}
               <button
                 type="button"
                 class="chip small"
-                title={chipTitle(message.context)}
                 onclick={() => onreveal?.(message.context!)}
               >
                 {#if message.context.thumbnail}<img src={message.context.thumbnail} alt="" />{/if}
@@ -413,7 +405,7 @@
               <!-- The API's summary of the model's thinking, folded away; it never sends the thinking itself. -->
               {@const live = message.status === 'streaming' && !message.text}
               <details class="thought">
-                <summary title="Show a summary of what the model thought about">
+                <summary>
                   <span class:thinking={live}>{live ? 'Thinking…' : thoughtFor(message.thinkingSeconds)}</span>
                   <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
                 </summary>
@@ -506,7 +498,7 @@
               <span>
                 From
                 {#if original}
-                  <button type="button" class="link" title={`Open ${chatTitle(original)}`} onclick={() => openChat(original.id)}
+                  <button type="button" class="link" onclick={() => openChat(original.id)}
                     >{chatTitle(original)}</button
                   >
                 {:else}
@@ -551,7 +543,7 @@
         {#if topic.context}
           {@const context = topic.context}
           <div class="attached" aria-label="Attached to your question">
-            <button type="button" class="chip" title={chipTitle(context)} onclick={() => onreveal?.(context)}>
+            <button type="button" class="chip" onclick={() => onreveal?.(context)}>
               {#if context.thumbnail}<img src={context.thumbnail} alt="" />{/if}
               <span>{chipName(context)}</span>
               {#if context.selection}<span class="quote">“{context.selection}”</span>{/if}
@@ -560,19 +552,17 @@
               type="button"
               class="remove"
               aria-label="Remove from your question"
-              title="Remove (Esc)"
               onclick={() => workspace.clearContext(topic.id)}>×</button
             >
           </div>
         {/if}
         {#if topic.quote}
           <div class="attached" aria-label="Replying to">
-            <blockquote class="quoted" title={topic.quote}>{topic.quote}</blockquote>
+            <blockquote class="quoted">{topic.quote}</blockquote>
             <button
               type="button"
               class="remove"
               aria-label="Remove the quote"
-              title="Remove (Esc)"
               onclick={() => workspace.clearQuote(topic.id)}>×</button
             >
           </div>
@@ -593,7 +583,6 @@
                 type="button"
                 class="send stop"
                 aria-label="Stop answering"
-                title="Stop answering"
                 onclick={() => {
                   workspace.stop(topic.id)
                   composer?.focus()
@@ -606,7 +595,6 @@
                 type="submit"
                 class="send"
                 aria-label="Send"
-                title="Send (Enter)"
                 disabled={!workspace.canSend(topic.id)}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg>

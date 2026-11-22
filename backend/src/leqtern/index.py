@@ -427,6 +427,8 @@ class Indexer:
                 "status": "ready",
                 "pages_done": index.page_count,
                 "page_count": index.page_count,
+                "title": index.title,
+                "kind": index.kind,
             }
         if doc_id in self.status:
             return self.status[doc_id]

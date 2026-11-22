@@ -87,6 +87,36 @@
   // The topic or discussion whose actions menu (the three dots) is open.
   let menuId = $state<string>()
 
+  // The card beside the sidebar for the source under the pointer: its full title and kind.
+  let sidebar: HTMLElement | undefined = $state()
+  let hoverCard = $state<{ id: string; top: number; left: number }>()
+  function showCard(id: string, row: HTMLElement) {
+    const box = row.getBoundingClientRect()
+    hoverCard = { id, top: box.top + box.height / 2, left: (sidebar?.getBoundingClientRect().right ?? box.right) + 8 }
+  }
+  function hideCard(id: string) {
+    if (hoverCard?.id === id) hoverCard = undefined
+  }
+  $effect(() => {
+    if (!expanded || menuId) hoverCard = undefined
+  })
+  function kindLabel(id: string): string {
+    const state = workspace.indexing[id]
+    if (state?.kind) return state.kind[0].toUpperCase() + state.kind.slice(1)
+    switch (state?.status) {
+      case 'uploading':
+      case 'queued':
+        return 'Not indexed yet'
+      case 'indexing':
+        return state.pageCount ? `Indexing, ${state.pagesDone} of ${state.pageCount} pages` : 'Indexing…'
+      case 'error':
+        return 'Could not be indexed'
+      default:
+        // Indexed before kinds were recorded, or not known to the backend yet.
+        return state?.status === 'ready' ? 'PDF' : 'Not indexed yet'
+    }
+  }
+
   function closeMenu(event: Event) {
     const target = event.target as Element | null
     if (menuId && !target?.closest?.('.topic-menu, .dots')) menuId = undefined
@@ -174,7 +204,14 @@
 
 <svelte:window onpointerdown={closeMenu} onkeydown={(e) => e.key === 'Escape' && ((menuId = undefined), popup && closeArchive())} />
 
-<aside class="topics-sidebar" class:closed={!open} id="topics-sidebar" aria-label="Topics">
+<aside
+  bind:this={sidebar}
+  class="topics-sidebar"
+  class:closed={!open}
+  id="topics-sidebar"
+  aria-label="Topics"
+  onscrollcapture={() => (hoverCard = undefined)}
+>
   <div class="top">
     {#if expanded}<h1 class="fade">Leqtern</h1>{/if}
     <button
@@ -187,7 +224,7 @@
     >
   </div>
 
-  <button type="button" class="new" aria-label="New topic" title="New topic" onclick={newTopic}>
+  <button type="button" class="new" aria-label="New topic" title={expanded ? undefined : 'New topic'} onclick={newTopic}>
     <span class="plus" aria-hidden="true">＋</span>
     {#if expanded}<span class="fade">New topic</span>{/if}
   </button>
@@ -223,9 +260,7 @@
                 type="button"
                 class="topic"
                 aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
-                title="Double-click to rename"
                 onclick={() => workspace.selectTopic(topic.id)}
-                ondblclick={() => startRename(topic.id, topic.name)}
               >
                 <span class="name" use:marquee><span>{topic.name}</span></span>
                 <span class="count">{topic.docIds.length}</span>
@@ -408,18 +443,15 @@
                 </li>
                 {#each topic.docIds as id (id)}
                   {@const name = workspace.docs[id]?.name ?? ''}
-                  {@const isOpen = topic.openDocIds.includes(id)}
                   <li class="discussion">
-                    <div class="row" class:active={isOpen && id === topic.activeDocId}>
-                      <button
-                        type="button"
-                        class="topic"
-                        aria-current={isOpen && id === topic.activeDocId ? 'true' : undefined}
-                        title={isOpen ? name : `${name} (closed, click to open)`}
-                        onclick={() => workspace.openDoc(id)}
-                      >
+                    <div
+                      class="row"
+                      role="presentation"
+                      onpointerenter={(e) => showCard(id, e.currentTarget)}
+                      onpointerleave={() => hideCard(id)}
+                    >
+                      <button type="button" class="topic" onclick={() => workspace.openDoc(id)}>
                         <span class="name" use:marquee><span>{name}</span></span>
-                        {#if isOpen}<span class="open-mark" role="img" aria-label="Open"></span>{/if}
                       </button>
                       <button
                         type="button"
@@ -468,7 +500,7 @@
     aria-label="Archive"
     aria-haspopup="dialog"
     aria-expanded={popup}
-    title="Archive"
+    title={expanded ? undefined : 'Archive'}
     onclick={toggleArchive}
   >
     <span class="plus" aria-hidden="true">
@@ -477,7 +509,7 @@
     {#if expanded}<span class="fade">Archive</span>{/if}
     {#if expanded && archived.length}<span class="fade archive-count">{archived.length}</span>{/if}
   </button>
-  <button type="button" class="new settings" aria-label="Settings" title="Settings" onclick={() => onopensettings?.()}>
+  <button type="button" class="new settings" aria-label="Settings" title={expanded ? undefined : 'Settings'} onclick={() => onopensettings?.()}>
     <span class="plus" aria-hidden="true">
       <svg viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="3" />
@@ -489,6 +521,14 @@
     {#if expanded}<span class="fade">Settings</span>{/if}
   </button>
 </aside>
+
+{#if hoverCard && workspace.docs[hoverCard.id]}
+  {@const doc = workspace.docs[hoverCard.id]}
+  <div class="source-card" role="tooltip" style:top="{hoverCard.top}px" style:left="{hoverCard.left}px">
+    <div class="source-title">{workspace.indexing[hoverCard.id]?.title || doc.name}</div>
+    <div class="source-kind">{kindLabel(hoverCard.id)}</div>
+  </div>
+{/if}
 
 {#if popup}
   <!-- The archived topics: open one, bring it back, or delete it. Pressing the backdrop closes it, like Settings. -->
@@ -505,7 +545,6 @@
               type="button"
               class="topic"
               aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
-              title={topic.name}
               onclick={() => {
                 workspace.selectTopic(topic.id)
                 closeArchive()
@@ -522,7 +561,7 @@
             >
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v4H3zM5 8v12h14V8M12 17v-6M9 14l3-3 3 3" /></svg>
             </button>
-            <button type="button" class="dots danger" aria-label={`Delete ${topic.name}`} title="Delete" onclick={() => remove(topic.id, topic.name)}>
+            <button type="button" class="dots danger" aria-label={`Delete ${topic.name}`} onclick={() => remove(topic.id, topic.name)}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
             </button>
           </li>
@@ -967,15 +1006,31 @@
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
   }
-  /* A small dot after the name of each PDF that is open as a tab. */
-  .open-mark {
-    flex: none;
-    align-self: center;
-    width: 0.375rem;
-    height: 0.375rem;
-    margin-left: 0.375rem;
-    border-radius: 50%;
-    background: var(--muted);
+  /* Beside the sidebar, centred on the source under the pointer. */
+  .source-card {
+    position: fixed;
+    z-index: 40;
+    transform: translateY(-50%);
+    /* Always this wide: a long title wraps rather than widening the card. */
+    box-sizing: border-box;
+    width: 16rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
+    pointer-events: none;
+  }
+  .source-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .source-kind {
+    margin-top: 0.125rem;
+    font-size: 0.75rem;
+    color: var(--muted);
   }
   .new-discussion {
     gap: 0.375rem;

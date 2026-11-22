@@ -266,7 +266,7 @@
               <CardEditor bind:card={cards[i]} types={CARD_TYPES.map((t) => t.id)} />
               <div class="meta">
                 {#if label}
-                  <button type="button" class="link" title="Show this page" onclick={() => reveal(candidate)}>{label}</button>
+                  <button type="button" class="link" onclick={() => reveal(candidate)}>{label}</button>
                 {/if}
                 {#if candidate.similar}
                   <span class="warning" title={candidate.similar.front}>
@@ -279,7 +279,6 @@
                 type="button"
                 class="chrome-button remove"
                 aria-label="Leave this card out"
-                title="Leave this card out"
                 onclick={() => cards.splice(i, 1)}>×</button
               >
             </li>

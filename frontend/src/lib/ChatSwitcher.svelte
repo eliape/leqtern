@@ -90,7 +90,7 @@
 <div class="switcher" bind:this={root}>
   {#if !listed.length}
     <!-- Nothing to switch to: just the title, without the arrow. -->
-    <h2 class="trigger static" title={`${chatTitle(current)} · ${topic.name}`}>
+    <h2 class="trigger static">
       <span class="title" class:empty={!current.messages.length}>{chatTitle(current)}</span>
     </h2>
   {:else}
@@ -102,7 +102,6 @@
     aria-haspopup="menu"
     aria-expanded={open}
     aria-label={`Discussion: ${chatTitle(current)}`}
-    title={`${chatTitle(current)} · ${topic.name}`}
     onclick={() => (open ? hide() : show())}
     onkeydown={(e) => {
       if (e.key === 'ArrowDown') {
@@ -125,7 +124,6 @@
             role="menuitemradio"
             class="pick"
             aria-checked={chat.id === current.id}
-            title={chatTitle(chat)}
             onclick={() => pick(chat.id)}
           >
             <span class="title">{chatTitle(chat)}</span>
@@ -137,7 +135,6 @@
             class="delete"
             tabindex="-1"
             aria-label={`Delete ${chatTitle(chat)}`}
-            title="Delete (Del)"
             onclick={() => remove(chat.id)}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
