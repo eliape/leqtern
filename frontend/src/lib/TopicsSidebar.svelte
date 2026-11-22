@@ -217,13 +217,12 @@
 
   {#if expanded}
     <div id="topics-list" class="list">
-      <h2>Topics</h2>
 
       {#if shown.length === 0 && archived.length === 0}
         <p class="hint">Topics group the PDFs you study together, like lecture notes, old exams and the course book.</p>
       {/if}
 
-      <ul>
+      <ul aria-label="Topics">
         {#each shown as topic (topic.id)}
           <li class:active={topic.id === workspace.activeTopicId}>
             {#if renamingId === topic.id}
@@ -646,7 +645,7 @@
     position: absolute;
     inset: 0 auto 0 0;
     z-index: 30;
-    width: 15rem;
+    width: 18rem;
     box-sizing: border-box;
     padding: 0 0.375rem 0.5rem;
     border-right: 1px solid var(--border);
@@ -685,7 +684,7 @@
 
   /* The list keeps its full width while the sidebar opens, so it is revealed rather than reflowed. */
   .list {
-    width: calc(15rem - 0.75rem);
+    width: calc(18rem - 0.75rem);
     /* Takes what room is left between the buttons, and scrolls when the topics need more. */
     flex: 1 1 auto;
     min-height: 0;
@@ -796,7 +795,6 @@
   }
   li.active {
     background: var(--selected);
-    font-weight: 600;
   }
 
   li form {
@@ -932,12 +930,11 @@
   li.discussions:hover {
     background: none;
   }
+  /* Plain words, starting where the topic's name does (the list is indented 0.875rem, the name 0.5rem). */
   h3 {
-    margin: 0.25rem 0 0.125rem 0.25rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    margin: 0.5rem 0 0.375rem -0.375rem;
+    font-size: 0.8rem;
+    font-weight: normal;
     color: var(--muted);
   }
   .archive-button + .settings {

@@ -199,7 +199,7 @@ describe('App', () => {
     expect(screen.queryByText(/Backend/)).not.toBeInTheDocument()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
     expect(sidebar.getByRole('heading', { name: 'Leqtern' })).toBeInTheDocument()
-    expect(sidebar.getByRole('heading', { name: 'Topics' })).toBeInTheDocument()
+    expect(sidebar.queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument()
   })
 
   it('asks for a PDF before one is open', () => {
@@ -481,7 +481,7 @@ describe('App', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Hide topics' }))
     await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Show topics' }))
-    await fireEvent.pointerDown(screen.getByRole('heading', { name: 'Topics' }))
+    await fireEvent.pointerDown(screen.getByRole('list', { name: 'Topics' }))
     expect(topicsSidebar().inert).toBe(false)
     await fireEvent.pointerDown(screen.getByRole('complementary', { name: 'Chat' }))
     expect(topicsSidebar().inert).toBe(true)

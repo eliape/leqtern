@@ -243,7 +243,7 @@
 
   function resizeWithSidebar(opening: boolean) {
     if (!viewer?.pagesCount) return
-    const room = 15 * parseFloat(getComputedStyle(document.documentElement).fontSize)
+    const room = 18 * parseFloat(getComputedStyle(document.documentElement).fontSize)
     if (sideFrame !== undefined) cancelAnimationFrame(sideFrame)
     sideFrame = undefined
     const startWidth = container.clientWidth
