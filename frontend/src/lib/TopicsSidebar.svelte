@@ -408,18 +408,10 @@
                 </li>
                 {#each topic.docIds as id (id)}
                   {@const name = workspace.docs[id]?.name ?? ''}
-                  {@const isOpen = topic.openDocIds.includes(id)}
                   <li class="discussion">
-                    <div class="row" class:active={isOpen && id === topic.activeDocId}>
-                      <button
-                        type="button"
-                        class="topic"
-                        aria-current={isOpen && id === topic.activeDocId ? 'true' : undefined}
-                        title={isOpen ? name : `${name} (closed, click to open)`}
-                        onclick={() => workspace.openDoc(id)}
-                      >
+                    <div class="row">
+                      <button type="button" class="topic" title={name} onclick={() => workspace.openDoc(id)}>
                         <span class="name" use:marquee><span>{name}</span></span>
-                        {#if isOpen}<span class="open-mark" role="img" aria-label="Open"></span>{/if}
                       </button>
                       <button
                         type="button"
@@ -966,16 +958,6 @@
   .row .topic {
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
-  }
-  /* A small dot after the name of each PDF that is open as a tab. */
-  .open-mark {
-    flex: none;
-    align-self: center;
-    width: 0.375rem;
-    height: 0.375rem;
-    margin-left: 0.375rem;
-    border-radius: 50%;
-    background: var(--muted);
   }
   .new-discussion {
     gap: 0.375rem;
