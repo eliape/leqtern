@@ -913,6 +913,7 @@ describe('Workspace saving', () => {
       status: async () => ready('srv1'),
     })
     ws.pages[doc.id] = 12
+    ws.zooms[doc.id] = 1.5
     chatOf(topic).mode = 'socratic'
     topic.draft = 'half a question'
     chatOf(topic).messages.push(
@@ -1050,6 +1051,7 @@ describe('Workspace saving', () => {
     expect(chatOf(back.activeTopic!).mode).toBe('socratic')
     expect(back.activeDoc?.data).toEqual(bytes(1, 2))
     expect(back.pages[doc.id]).toBe(12)
+    expect(back.zooms[doc.id]).toBe(1.5)
     // An answer still arriving is saved without what had arrived, so it isn't saved for every piece.
     expect(json.topics[0].chats[0].messages[2]).toEqual({ id: 'b', role: 'assistant', text: '', status: 'streaming' })
     expect(chatOf(back.activeTopic!).messages.map((m) => m.text)).toEqual(['', 'What do you see?', 'The answer stopped when the app was closed.'])
