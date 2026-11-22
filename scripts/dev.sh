@@ -10,8 +10,14 @@ BACKEND_PORT=8000
 say() { echo "dev.sh: $*" >&2; }
 
 # Fail before starting anything if the backend's port is taken, usually by an
-# earlier run that is still alive.
-if (exec 3<>"/dev/tcp/127.0.0.1/$BACKEND_PORT") 2>/dev/null; then
+# earlier run that is still alive. One that was just told to stop takes a moment
+# to shut down and let go of the port, so give it a few seconds first.
+port_taken() { (exec 3<>"/dev/tcp/127.0.0.1/$BACKEND_PORT") 2>/dev/null; }
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  port_taken || break
+  sleep 0.5
+done
+if port_taken; then
   say "port $BACKEND_PORT is already in use, probably by an earlier run of the backend."
   say "see what holds it:  lsof -i :$BACKEND_PORT"
   say "stop it:            lsof -ti :$BACKEND_PORT | xargs kill"
@@ -36,6 +42,9 @@ stop_all() {
 }
 trap 'stop_all; exit 130' INT
 trap 'stop_all; exit 143' TERM
+# Closing the terminal (or its tab) sends HUP. Without this the servers, each in
+# its own process group, would outlive it and keep the port.
+trap 'stop_all; exit 129' HUP
 trap stop_all EXIT
 
 while kill -0 "$backend_pid" 2>/dev/null && kill -0 "$frontend_pid" 2>/dev/null; do

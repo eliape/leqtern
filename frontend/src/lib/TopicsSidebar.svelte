@@ -7,7 +7,7 @@
   const ARCHIVE_ICON = 'M3 4h18v4H3zM5 8v12h14V8M10 12h4'
   import { marquee } from './marquee'
   import SourceCard from './SourceCard.svelte'
-  import { CardHover } from './sourceCard.svelte'
+  import { CardHover } from './cardHover.svelte'
   import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
 
   type Props = {
@@ -100,7 +100,7 @@
 
   let renamingId = $state<string>()
   // What is being renamed: a topic, or one of the open topic's discussions or sources.
-  let renamingKind: 'topic' | 'chat' | 'doc' = 'topic'
+  let renamingKind = $state<'topic' | 'chat' | 'doc'>('topic')
   let renamingTopic: string | undefined
   let draft = $state('')
   let renameInput = $state<HTMLInputElement>()
@@ -726,7 +726,6 @@
     stroke-linecap: round;
     stroke-linejoin: round;
   }
-  .toggle:hover,
   .new:hover {
     background: var(--hover);
   }
