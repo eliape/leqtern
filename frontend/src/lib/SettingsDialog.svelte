@@ -1,3 +1,8 @@
+<script lang="ts" module>
+  // The category the dialog was last left on, for the rest of the visit.
+  let lastCategory: 'appearance' | 'chat' | 'tutoring' = 'appearance'
+</script>
+
 <script lang="ts">
   import { saveZoomFollowsChat } from './chatZoom'
   import { quizMask, quizTyped, setHideQuizChoices, setTypedQuizShare } from './quizMask.svelte'
@@ -25,11 +30,25 @@
     saveZoomFollowsChat(follow)
   }
 
+  const CATEGORIES = [
+    { id: 'appearance', name: 'Appearance' },
+    { id: 'chat', name: 'Chat bot' },
+    { id: 'tutoring', name: 'Tutoring' },
+  ] as const
+  type Category = (typeof CATEGORIES)[number]['id']
+  let category = $state<Category>(lastCategory)
+
+  function show(next: Category) {
+    category = next
+    lastCategory = next
+  }
+
   let card = $state<HTMLElement>()
   // Back to wherever focus was (the Settings button) once it closes.
   const returnTo = document.activeElement as HTMLElement | null
   $effect(() => {
-    card?.querySelector('textarea')?.focus()
+    // Focus the picked category, not a field, so nothing starts in typing mode.
+    card?.querySelector<HTMLElement>('nav [aria-current="page"]')?.focus()
     return () => returnTo?.focus?.()
   })
 
@@ -55,76 +74,88 @@
       <button type="button" class="chrome-button close" aria-label="Close settings" onclick={onclose}>×</button>
     </header>
 
-    <label class="field">
-      <span class="label">Instructions for every answer</span>
-      <span class="hint">Added to what the model is told in every topic, like “Answer in Swedish” or “I'm preparing for an exam”.</span>
-      <textarea rows="6" bind:value={workspace.instructions} placeholder="Nothing yet"></textarea>
-    </label>
-
-    <div class="field">
-      <span class="label" id="names-label">Source names</span>
-      <span class="hint">
-        {workspace.indexTitles
-          ? 'Sources go by the title found when they were indexed, until you rename them.'
-          : 'Sources go by their file name, until you rename them.'}
-      </span>
-      <div class="segments" role="radiogroup" aria-labelledby="names-label">
-        <button type="button" role="radio" aria-checked={workspace.indexTitles} onclick={() => workspace.setIndexTitles(true)}>Title from the index</button>
-        <button type="button" role="radio" aria-checked={!workspace.indexTitles} onclick={() => workspace.setIndexTitles(false)}>File name</button>
-      </div>
-    </div>
-
-    <div class="field">
-      <span class="label" id="theme-label">Theme</span>
-      <div class="segments" role="radiogroup" aria-labelledby="theme-label">
-        {#each THEMES as t (t.id)}
-          <button type="button" role="radio" aria-checked={theme === t.id} onclick={() => pick(t.id)}>{t.name}</button>
+    <div class="body">
+      <nav aria-label="Settings categories">
+        {#each CATEGORIES as c (c.id)}
+          <button type="button" aria-current={category === c.id ? 'page' : undefined} onclick={() => show(c.id)}>{c.name}</button>
         {/each}
-      </div>
-    </div>
+      </nav>
 
-    <div class="field">
-      <span class="label" id="zoom-label">PDF size with the chat</span>
-      <span class="hint">
-        {zoomFollowsChat
-          ? 'The PDF opens a little bigger and shrinks to fit beside the chat when it opens, then grows back.'
-          : 'The PDF keeps one size that already leaves room for the chat beside it.'}
-      </span>
-      <div class="segments" role="radiogroup" aria-labelledby="zoom-label">
-        <button type="button" role="radio" aria-checked={zoomFollowsChat} onclick={() => pickZoom(true)}>Fit to chat</button>
-        <button type="button" role="radio" aria-checked={!zoomFollowsChat} onclick={() => pickZoom(false)}>Fixed size</button>
-      </div>
-    </div>
+      <section class="pane" aria-label={CATEGORIES.find((c) => c.id === category)?.name}>
+        {#if category === 'appearance'}
+          <div class="field">
+            <span class="label" id="theme-label">Theme</span>
+            <div class="segments" role="radiogroup" aria-labelledby="theme-label">
+              {#each THEMES as t (t.id)}
+                <button type="button" role="radio" aria-checked={theme === t.id} onclick={() => pick(t.id)}>{t.name}</button>
+              {/each}
+            </div>
+          </div>
 
-    <div class="field">
-      <span class="label" id="quiz-mask-label">Quiz choices</span>
-      <span class="hint">
-        {quizMask.hideChoices
-          ? 'Each question’s choices stay covered until you click them, so you think of an answer first.'
-          : 'Each question shows its choices right away.'}
-      </span>
-      <div class="segments" role="radiogroup" aria-labelledby="quiz-mask-label">
-        <button type="button" role="radio" aria-checked={quizMask.hideChoices} onclick={() => setHideQuizChoices(true)}>Hidden until clicked</button>
-        <button type="button" role="radio" aria-checked={!quizMask.hideChoices} onclick={() => setHideQuizChoices(false)}>Shown</button>
-      </div>
-    </div>
+          <div class="field">
+            <span class="label" id="names-label">Source names</span>
+            <span class="hint">
+              {workspace.indexTitles
+                ? 'Sources go by the title found when they were indexed, until you rename them.'
+                : 'Sources go by their file name, until you rename them.'}
+            </span>
+            <div class="segments" role="radiogroup" aria-labelledby="names-label">
+              <button type="button" role="radio" aria-checked={workspace.indexTitles} onclick={() => workspace.setIndexTitles(true)}>Title from the index</button>
+              <button type="button" role="radio" aria-checked={!workspace.indexTitles} onclick={() => workspace.setIndexTitles(false)}>File name</button>
+            </div>
+          </div>
 
-    <div class="field">
-      <label class="label" for="typed-share">Typed answers in quizzes</label>
-      <div class="slider">
-        <input
-          id="typed-share"
-          type="range"
-          min="0"
-          max="100"
-          step="10"
-          value={Math.round(quizTyped.share * 100)}
-          aria-valuetext={`At most ${Math.round(quizTyped.share * 100)}%`}
-          oninput={(e) => setTypedQuizShare(Number(e.currentTarget.value) / 100)}
-        />
-        <span class="value">{quizTyped.share ? `Up to ${Math.round(quizTyped.share * 100)}%` : 'None'}</span>
-      </div>
-      <span class="hint">Research shows that typing short answers yourself helps you remember more than picking from choices.</span>
+          <div class="field">
+            <span class="label" id="zoom-label">PDF size with the chat</span>
+            <span class="hint">
+              {zoomFollowsChat
+                ? 'The PDF opens a little bigger and shrinks to fit beside the chat when it opens, then grows back.'
+                : 'The PDF keeps one size that already leaves room for the chat beside it.'}
+            </span>
+            <div class="segments" role="radiogroup" aria-labelledby="zoom-label">
+              <button type="button" role="radio" aria-checked={zoomFollowsChat} onclick={() => pickZoom(true)}>Fit to chat</button>
+              <button type="button" role="radio" aria-checked={!zoomFollowsChat} onclick={() => pickZoom(false)}>Fixed size</button>
+            </div>
+          </div>
+        {:else if category === 'chat'}
+          <label class="field">
+            <span class="label">Instructions for every answer</span>
+            <span class="hint">Added to what the model is told in every topic, like “Answer in Swedish” or “I'm preparing for an exam”.</span>
+            <textarea rows="6" bind:value={workspace.instructions} placeholder="Nothing yet"></textarea>
+          </label>
+        {:else}
+          <div class="field">
+            <span class="label" id="quiz-mask-label">Quiz choices</span>
+            <span class="hint">
+              {quizMask.hideChoices
+                ? 'Each question’s choices stay covered until you click them, so you think of an answer first.'
+                : 'Each question shows its choices right away.'}
+            </span>
+            <div class="segments" role="radiogroup" aria-labelledby="quiz-mask-label">
+              <button type="button" role="radio" aria-checked={quizMask.hideChoices} onclick={() => setHideQuizChoices(true)}>Hidden until clicked</button>
+              <button type="button" role="radio" aria-checked={!quizMask.hideChoices} onclick={() => setHideQuizChoices(false)}>Shown</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label" for="typed-share">Typed answers in quizzes</label>
+            <div class="slider">
+              <input
+                id="typed-share"
+                type="range"
+                min="0"
+                max="100"
+                step="10"
+                value={Math.round(quizTyped.share * 100)}
+                aria-valuetext={`At most ${Math.round(quizTyped.share * 100)}%`}
+                oninput={(e) => setTypedQuizShare(Number(e.currentTarget.value) / 100)}
+              />
+              <span class="value">{quizTyped.share ? `Up to ${Math.round(quizTyped.share * 100)}%` : 'None'}</span>
+            </div>
+            <span class="hint">Research shows that typing short answers yourself helps you remember more than picking from choices.</span>
+          </div>
+        {/if}
+      </section>
     </div>
   </div>
 </div>
@@ -142,8 +173,8 @@
   .card {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
-    width: min(30rem, 100%);
+    gap: 1rem;
+    width: min(44rem, 100%);
     max-height: 100%;
     box-sizing: border-box;
     overflow-y: auto;
@@ -164,6 +195,49 @@
   }
   .close {
     font-size: 1.25rem;
+  }
+  .body {
+    display: flex;
+    gap: 1.25rem;
+    min-height: 22rem;
+  }
+  nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    flex: none;
+    width: 9rem;
+  }
+  nav button {
+    padding: 0.375rem 0.625rem;
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+  }
+  nav button:hover {
+    background: var(--hover);
+    color: inherit;
+  }
+  nav button[aria-current='page'] {
+    background: var(--hover);
+    color: inherit;
+    font-weight: 600;
+  }
+  nav button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    flex: 1;
+    min-width: 0;
   }
   .field {
     display: flex;
