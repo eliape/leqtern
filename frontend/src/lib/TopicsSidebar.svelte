@@ -636,7 +636,7 @@
     color: inherit;
     font: inherit;
     cursor: pointer;
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
   }
   .new {
     display: flex;
@@ -709,7 +709,7 @@
     display: flex;
     align-items: center;
     margin-block: 1px;
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
   }
   li:hover {
     background: var(--row-hover);
@@ -908,7 +908,8 @@
   }
   li.discussions ul {
     --branch: color-mix(in srgb, var(--muted) 35%, transparent);
-    margin-left: 0.5rem;
+    /* Padding, not margin: the line sits in it, so the slide's clipping doesn't hide it until the end. */
+    padding-left: 0.5rem;
   }
   li.discussion {
     margin-block: 0;
@@ -925,7 +926,7 @@
     align-items: center;
     /* The 2px gap lives on the row, so the branch line beside the rows stays unbroken. */
     margin-block: 1px;
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
   }
   .row:hover {
     background: var(--row-hover);

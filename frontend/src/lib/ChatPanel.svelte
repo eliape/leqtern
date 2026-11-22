@@ -924,7 +924,7 @@
     align-items: center;
     gap: 0.2rem;
     padding: 0.1rem 0.3rem 0.1rem 0;
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
     list-style: none;
     cursor: pointer;
     user-select: none;
@@ -1186,7 +1186,7 @@
     min-width: 0;
     padding: 0.25rem;
     border: 1px solid var(--border);
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
     background: var(--surface);
     color: inherit;
     font: inherit;
@@ -1239,7 +1239,7 @@
     font: inherit;
     font-size: 1.1rem;
     padding: 0.25rem 0.5rem;
-    border-radius: 0.375rem;
+    border-radius: var(--radius);
     cursor: pointer;
   }
   .remove:hover {
