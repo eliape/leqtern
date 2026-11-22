@@ -306,8 +306,11 @@
       const min = -lefts[from]
       const max = lefts[lefts.length - 1] + widths[widths.length - 1] - (lefts[from] + widths[from])
       dragDx = Math.max(min, Math.min(max, dx))
-      const centre = lefts[from] + widths[from] / 2 + dragDx
-      dragTo = lefts.filter((l, i) => i !== from && l + widths[i] / 2 <= centre).length
+      // A tab is passed once the dragged tab's leading edge crosses its middle, so the first and
+      // last places are reachable even though the tab can't leave the row.
+      const left = lefts[from] + dragDx
+      const right = left + widths[from]
+      dragTo = lefts.filter((l, i) => i !== from && (i < from ? left > l + widths[i] / 2 : right > l + widths[i] / 2)).length
     }
     const stop = (drop: boolean) => {
       window.removeEventListener('pointermove', move)

@@ -658,10 +658,13 @@ describe('App', () => {
       Object.defineProperty(el, 'offsetWidth', { configurable: true, value: 100 })
     }
     await fireEvent.pointerDown(first, { clientX: 50, button: 0 })
-    await fireEvent.pointerMove(window, { clientX: 130 })
-    // The dragged tab follows the pointer; the other slides aside once it is passed halfway.
-    expect(first.style.transform).toBe('translateX(80px)')
+    await fireEvent.pointerMove(window, { clientX: 90 })
+    // The dragged tab follows the pointer; the other slides aside once its leading edge passes the other's middle.
+    expect(first.style.transform).toBe('translateX(40px)')
     expect(second.style.transform).toBe('')
+    await fireEvent.pointerMove(window, { clientX: 110 })
+    expect(second.style.transform).toBe('translateX(-100px)')
+    // Held at the row's end, it still takes the last place.
     await fireEvent.pointerMove(window, { clientX: 400 })
     expect(first.style.transform).toBe('translateX(100px)')
     expect(second.style.transform).toBe('translateX(-100px)')
