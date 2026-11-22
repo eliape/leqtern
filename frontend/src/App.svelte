@@ -18,6 +18,7 @@
   import { savedZoomFollowsChat } from './lib/chatZoom'
   import TopicProfileDialog from './lib/TopicProfileDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
+  import AddSourceMenu from './lib/AddSourceMenu.svelte'
   import SourceCard from './lib/SourceCard.svelte'
   import { CardHover } from './lib/cardHover.svelte'
   import { chatTitle, type FlashcardSource, type Mode, Workspace } from './lib/workspace.svelte'
@@ -854,15 +855,7 @@
             </div>
           {/each}
         </div>
-        <button
-          type="button"
-          class="chrome-button add-tab"
-          aria-label={`Add a PDF to ${workspace.activeTopic.name}`}
-          title="Add a PDF"
-          onclick={() => fileInput.click()}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-        </button>
+        <AddSourceMenu {workspace} onupload={() => fileInput.click()} />
         <div class="controls-slot" bind:this={controlsEl}></div>
         <!-- Fixed in the window's top right corner. The chat panel opens over that corner and
              shows its close button in the same spot, so this fades out while the chat is open. -->
@@ -1207,14 +1200,6 @@
 
   .reload {
     margin-left: 0.5rem;
-  }
-
-  .add-tab {
-    flex-shrink: 0;
-    color: var(--muted);
-  }
-  .add-tab:hover {
-    color: inherit;
   }
 
   .outline-toggle,
