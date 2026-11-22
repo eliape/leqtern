@@ -238,7 +238,7 @@
     <h1>Leqtern</h1>
   </div>
 
-  <button type="button" class="new" aria-label="New topic" onclick={newTopic}>
+  <button type="button" class="new new-topic" aria-label="New topic" onclick={newTopic}>
     <span class="plus" aria-hidden="true">＋</span>
     <span>New topic</span>
   </button>
@@ -677,8 +677,9 @@
     backdrop-filter: none;
     box-shadow: none;
   }
+  /* Starts nearly in place, so it only slides the last bit as it fades in. */
   .topics-sidebar.closed {
-    transform: translateX(-100%);
+    transform: translateX(-10%);
     opacity: 0;
     visibility: hidden;
     box-shadow: none;
@@ -738,6 +739,10 @@
     overflow: hidden;
     text-align: left;
   }
+  /* As far below the top bar as the Topics heading is below it. */
+  .new-topic {
+    margin-top: 0.375rem;
+  }
   .plus {
     flex-shrink: 0;
     width: var(--icon-cell);
@@ -772,7 +777,7 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted);
-    margin: 0.75rem 0.5rem 0.25rem;
+    margin: 0.25rem 0.5rem 0.25rem;
   }
 
   .hint {
