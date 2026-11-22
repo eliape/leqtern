@@ -125,6 +125,16 @@ def get_services() -> Services:
 ServicesDep = Annotated[Services, Depends(get_services)]
 
 
+def file_details(services: Services, doc_id: str) -> dict[str, Any]:
+    """The name the PDF was first uploaded under, and when (its file's time, in Unix seconds)."""
+    doc = services.library.get(doc_id)
+    source = services.library.folder(doc_id) / "source.pdf"
+    details: dict[str, Any] = {"file_name": doc.name} if doc else {}
+    if source.is_file():
+        details["uploaded"] = source.stat().st_mtime
+    return details
+
+
 @app.post("/api/docs")
 async def add_doc(request: Request, services: ServicesDep, name: str = Query("document.pdf")):
     """Store a PDF (sent as the request body) and start indexing it in the background."""
@@ -140,7 +150,7 @@ async def add_doc(request: Request, services: ServicesDep, name: str = Query("do
         logger.exception("Could not read %s", name)
         raise HTTPException(status_code=422, detail="Could not read this PDF.") from error
     services.indexer.enqueue(doc.id)
-    return {"id": doc.id, **services.indexer.doc_status(doc.id)}
+    return {"id": doc.id, **services.indexer.doc_status(doc.id), **file_details(services, doc.id)}
 
 
 @app.get("/api/docs/{doc_id}")
@@ -148,7 +158,7 @@ async def doc_status(doc_id: str, services: ServicesDep) -> dict[str, Any]:
     if services.library.get(doc_id) is None:
         raise HTTPException(status_code=404, detail="No such document.")
     services.indexer.resume(doc_id)
-    return {"id": doc_id, **services.indexer.doc_status(doc_id)}
+    return {"id": doc_id, **services.indexer.doc_status(doc_id), **file_details(services, doc_id)}
 
 
 @app.post("/api/docs/{doc_id}/index")
@@ -157,7 +167,7 @@ async def retry_index(doc_id: str, services: ServicesDep) -> dict[str, Any]:
     if services.library.get(doc_id) is None:
         raise HTTPException(status_code=404, detail="No such document.")
     services.indexer.retry(doc_id)
-    return {"id": doc_id, **services.indexer.doc_status(doc_id)}
+    return {"id": doc_id, **services.indexer.doc_status(doc_id), **file_details(services, doc_id)}
 
 
 @app.get("/api/docs/{doc_id}/pdf")

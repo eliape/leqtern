@@ -18,6 +18,8 @@
   import { savedZoomFollowsChat } from './lib/chatZoom'
   import TopicProfileDialog from './lib/TopicProfileDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
+  import SourceCard from './lib/SourceCard.svelte'
+  import { CardHover } from './lib/sourceCard.svelte'
   import { chatTitle, type FlashcardSource, type Mode, Workspace } from './lib/workspace.svelte'
 
   const workspace = new Workspace()
@@ -175,6 +177,17 @@
     if (topicId) chatOpenBy[topicId] = open
   }
 
+  // The same card as the sidebar's sources, below a hovered tab.
+  const tabCard = new CardHover()
+  function showTabCard(id: string, tab: HTMLElement) {
+    tabCard.show(id, () => {
+      const box = tab.getBoundingClientRect()
+      const width = 16 * parseFloat(getComputedStyle(document.documentElement).fontSize)
+      return { x: Math.max(8, Math.min(box.left, window.innerWidth - width - 8)), y: box.bottom + 6 }
+    })
+  }
+  $effect(() => () => tabCard.clear())
+
   /** A discussion picked (or started) in the sidebar: show it, ready to type. */
   function openChatFromSidebar() {
     setChatOpen(true)
@@ -287,7 +300,7 @@
     if (!data) return
     data.setData(TAB_TYPE, id)
     data.effectAllowed = 'move'
-    const card = dragCard(workspace.docs[id]?.name ?? '')
+    const card = dragCard(workspace.docName(id))
     document.body.appendChild(card)
     data.setDragImage(card, 16, 16)
     // The browser has taken its picture by the next turn.
@@ -762,26 +775,33 @@
           role="tablist"
           aria-label={`PDFs in ${workspace.activeTopic.name}`}
           bind:this={tabsEl}
-          onwheel={scrollTabs}
+          onwheel={(e) => {
+            tabCard.close()
+            scrollTabs(e)
+          }}
           ondragover={dragTabOver}
           ondrop={dropTab}
         >
           {#each workspace.activeTopic.openDocIds as id (id)}
-            {@const tab = workspace.docs[id]}
             <div
               class="tab"
               class:active={id === doc?.id}
               class:dragged={id === dragTab}
               role="presentation"
               draggable="true"
-              ondragstart={(e) => startTabDrag(e, id)}
+              onpointerenter={(e) => showTabCard(id, e.currentTarget)}
+              onpointerleave={() => tabCard.leave()}
+              ondragstart={(e) => {
+                tabCard.close()
+                startTabDrag(e, id)
+              }}
               ondragend={endTabDrag}
             >
               <button
                 type="button"
                 role="tab"
                 aria-selected={id === doc?.id}
-                onclick={() => workspace.selectDoc(id)}>{tab.name}</button
+                onclick={() => workspace.selectDoc(id)}>{workspace.docName(id)}</button
               >
               {#if workspace.indexing[id]?.status === 'error'}
                 <button type="button" class="index-status failed" title={`${indexTitle(id)} Click to try again.`} onclick={() => workspace.retryIndex(id)}
@@ -790,7 +810,7 @@
               {:else if indexLabel(id)}
                 <span class="index-status" title={indexTitle(id)}>{indexLabel(id)}</span>
               {/if}
-              <button type="button" class="close" aria-label={`Close ${tab.name}`} onclick={() => workspace.closeDoc(id)}>
+              <button type="button" class="close" aria-label={`Close ${workspace.docName(id)}`} onclick={() => workspace.closeDoc(id)}>
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
               </button>
             </div>
@@ -928,6 +948,8 @@
     onreveal={reveal}
     onflashcards={flashcardsFromChat}
   />
+
+  <SourceCard {workspace} hover={tabCard} placement="below" />
 
   {#if menu}
     <ContextMenu x={menu.x} y={menu.y} label="Study this" items={menuItems(menu)} onclose={() => (menu = undefined)} />

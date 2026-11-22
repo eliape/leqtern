@@ -62,6 +62,19 @@
     </label>
 
     <div class="field">
+      <span class="label" id="names-label">Source names</span>
+      <span class="hint">
+        {workspace.indexTitles
+          ? 'Sources go by the title found when they were indexed, until you rename them.'
+          : 'Sources go by their file name, until you rename them.'}
+      </span>
+      <div class="segments" role="radiogroup" aria-labelledby="names-label">
+        <button type="button" role="radio" aria-checked={workspace.indexTitles} onclick={() => workspace.setIndexTitles(true)}>Title from the index</button>
+        <button type="button" role="radio" aria-checked={!workspace.indexTitles} onclick={() => workspace.setIndexTitles(false)}>File name</button>
+      </div>
+    </div>
+
+    <div class="field">
       <span class="label" id="theme-label">Theme</span>
       <div class="segments" role="radiogroup" aria-labelledby="theme-label">
         {#each THEMES as t (t.id)}

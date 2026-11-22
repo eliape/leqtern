@@ -88,6 +88,16 @@ def test_a_stored_pdf_can_be_downloaded_again(client: TestClient) -> None:
     assert client.get("/api/docs/0000000000000000/pdf").status_code == 404
 
 
+def test_a_pdfs_status_names_its_file_and_when_it_was_uploaded(client: TestClient) -> None:
+    data = make_pdf([filler("limits")])
+    added = client.post(
+        "/api/docs?name=Lecture 4.pdf", content=data, headers={"Content-Type": "application/pdf"}
+    ).json()
+    status = client.get(f"/api/docs/{added['id']}").json()
+    assert status["file_name"] == added["file_name"] == "Lecture 4.pdf"
+    assert status["uploaded"] > 1_700_000_000
+
+
 @pytest.fixture
 def services(tmp_path):
     services = main.Services(Settings(data_dir=tmp_path, anthropic_api_key=None))

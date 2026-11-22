@@ -85,6 +85,9 @@ export type IndexState = {
   /** The document's title and kind (lecture notes, exam, …), from its index once it is ready. */
   title?: string
   kind?: string
+  /** The name the PDF was first uploaded under, and when (Unix seconds), from the backend. */
+  fileName?: string
+  uploaded?: number
 }
 
 /** The backend calls indexing uses. Tests pass fakes. */
@@ -246,6 +249,15 @@ export function discussions(topic: Topic): Chat[] {
 }
 
 /** What a discussion is called: Haiku's title, or until it comes, the start of its first question. */
+const INDEX_TITLES_KEY = 'leqtern.indexTitles'
+function savedIndexTitles(): boolean {
+  try {
+    return localStorage.getItem(INDEX_TITLES_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
 export function chatTitle(chat: Chat): string {
   if (chat.title) return chat.title
   const first = chat.messages.find((m) => m.role === 'user')
@@ -272,6 +284,8 @@ export class Workspace {
   answerEffort = $state<string>()
   /** The reader's own instructions, sent with every question (set in Settings). */
   instructions = $state('')
+  /** Whether sources go by the title their index found (a setting); otherwise by their file name. */
+  indexTitles = $state(savedIndexTitles())
   /** Indexing progress per PDF (by tab id). */
   indexing = $state<Record<string, IndexState>>({})
   /** The page each tab was last on, so it opens there next time. */
@@ -332,6 +346,27 @@ export class Workspace {
   renameChat(topicId: string, chatId: string, name: string) {
     const chat = this.topics.find((t) => t.id === topicId)?.chats.find((c) => c.id === chatId)
     if (chat && name.trim()) chat.title = name.trim()
+  }
+
+  /**
+   * What a source is called in the sidebar, on its tab and on its card: a name given by hand,
+   * else (with the setting on) the title its index found, else its file name. The model and
+   * citations go by `name`, the file name or the name given by hand.
+   */
+  docName(id: string): string {
+    const doc = this.docs[id]
+    if (!doc) return ''
+    if (doc.renamed || !this.indexTitles) return doc.name
+    return this.indexing[id]?.title || doc.name
+  }
+
+  setIndexTitles(on: boolean) {
+    this.indexTitles = on
+    try {
+      localStorage.setItem(INDEX_TITLES_KEY, on ? '1' : '0')
+    } catch {
+      // Not remembered, then.
+    }
   }
 
   /** Rename a source: the sidebar, its tab and the model all go by the new name. */
@@ -425,6 +460,8 @@ export class Workspace {
         error: s.error,
         title: s.title || undefined,
         kind: s.kind || undefined,
+        fileName: s.file_name || undefined,
+        uploaded: s.uploaded,
       }
       return s.status !== 'ready' && s.status !== 'error'
     }

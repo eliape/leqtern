@@ -218,6 +218,23 @@ describe('Workspace', () => {
     expect(chatTitle(chat)).toBe('Bases')
   })
 
+  it('names a source by its index title or file name, as set, and always by a name given by hand', () => {
+    localStorage.removeItem('leqtern.indexTitles')
+    const ws = new Workspace()
+    const doc = ws.addDoc('l4.pdf', bytes(1))
+    expect(ws.docName(doc.id)).toBe('l4.pdf')
+    ws.indexing[doc.id] = { status: 'ready', pagesDone: 3, pageCount: 3, title: 'Lecture 4: Eigenvalues' }
+    expect(ws.docName(doc.id)).toBe('Lecture 4: Eigenvalues')
+    ws.setIndexTitles(false)
+    expect(ws.docName(doc.id)).toBe('l4.pdf')
+    expect(new Workspace().indexTitles).toBe(false)
+    ws.renameDoc(doc.id, 'Week 4')
+    expect(ws.docName(doc.id)).toBe('Week 4')
+    ws.setIndexTitles(true)
+    expect(ws.docName(doc.id)).toBe('Week 4')
+    localStorage.removeItem('leqtern.indexTitles')
+  })
+
   it('deletes a topic with its PDFs and selects a neighbour', () => {
     const ws = new Workspace()
     const first = ws.createTopic('First')
