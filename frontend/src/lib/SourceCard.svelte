@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CardHover } from './sourceCard.svelte'
+  import type { CardHover } from './cardHover.svelte'
   import type { Workspace } from './workspace.svelte'
 
   type Props = {

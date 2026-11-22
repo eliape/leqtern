@@ -19,7 +19,7 @@
   import TopicProfileDialog from './lib/TopicProfileDialog.svelte'
   import TopicsSidebar from './lib/TopicsSidebar.svelte'
   import SourceCard from './lib/SourceCard.svelte'
-  import { CardHover } from './lib/sourceCard.svelte'
+  import { CardHover } from './lib/cardHover.svelte'
   import { chatTitle, type FlashcardSource, type Mode, Workspace } from './lib/workspace.svelte'
 
   const workspace = new Workspace()
