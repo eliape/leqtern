@@ -51,12 +51,13 @@
 
   const menuItems = (selector: string) => Array.from(filterEl?.querySelectorAll<HTMLElement>(selector) ?? [])
 
-  async function toggleFilter() {
+  // Opened by the keyboard, the first item takes focus; opened by the pointer, nothing is shaded until hovered.
+  async function toggleFilter(event: MouseEvent) {
     filterOpen = !filterOpen
     sub = undefined
-    if (filterOpen) {
+    if (filterOpen && event.detail === 0) {
       await tick()
-      menuItems('.filter-menu > .sub > [role="menuitem"]')[0]?.focus()
+      setTimeout(() => menuItems('.filter-menu > .sub > [role="menuitem"]')[0]?.focus())
     }
   }
 
@@ -156,7 +157,7 @@
                   aria-haspopup="menu"
                   aria-expanded={sub === row.id}
                   class:shown={sub === row.id}
-                  onclick={() => showSub(row.id, true)}
+                  onclick={(e) => showSub(row.id, e.detail === 0)}
                 >
                   <span class="label">{row.label}</span>
                   <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
@@ -210,6 +211,8 @@
     z-index: 100;
     display: grid;
     place-items: center;
+    /* One track the size of the window, so the card's height can't stretch it and shift the card. */
+    grid-template: minmax(0, 1fr) / minmax(0, 1fr);
     padding: 1rem;
     background: rgb(0 0 0 / 0.35);
   }
@@ -217,11 +220,11 @@
   .card {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    width: min(30rem, 100%);
+    gap: 1rem;
+    width: min(44rem, 100%);
     height: min(36rem, 100%);
     box-sizing: border-box;
-    padding: 1rem 1.25rem 1rem;
+    padding: 1rem 1.25rem 1.5rem;
     border: 1px solid var(--border);
     border-radius: 0.75rem;
     background: var(--surface);
@@ -289,7 +292,7 @@
     outline: none;
   }
   .sub > button:hover,
-  .sub > button:focus,
+  .sub > button:focus-visible,
   .sub > button.shown {
     background: var(--hover);
   }

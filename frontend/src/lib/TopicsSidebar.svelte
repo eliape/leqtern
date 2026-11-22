@@ -6,6 +6,7 @@
   // A box with a lid.
   const ARCHIVE_ICON = 'M3 4h18v4H3zM5 8v12h14V8M10 12h4'
   import { marquee } from './marquee'
+  import { confirmDeleteTopic } from './deleteTopic'
   import DiscussionsDialog from './DiscussionsDialog.svelte'
   import SourceCard from './SourceCard.svelte'
   import { CardHover } from './cardHover.svelte'
@@ -46,29 +47,9 @@
     onopenflashcards,
   }: Props = $props()
 
-  // Archived topics are listed apart, in their own section above Settings.
+  // Archived topics are listed in Settings, under Archive.
   const shown = $derived(workspace.topics.filter((t) => !t.archived))
   const archived = $derived(workspace.topics.filter((t) => t.archived))
-  // The Archive button opens a dialog listing them, like the Settings one.
-  let popup = $state(false)
-  let archiveCard = $state<HTMLElement>()
-  let archiveReturn: HTMLElement | null = null
-  function toggleArchive() {
-    archiveReturn = document.activeElement as HTMLElement | null
-    popup = !popup
-  }
-  function closeArchive() {
-    popup = false
-    archiveReturn?.focus?.()
-  }
-  $effect(() => {
-    if (popup) archiveCard?.focus()
-  })
-  // Nothing left in it: close it.
-  $effect(() => {
-    if (popup && archived.length === 0) popup = false
-  })
-
   // A topic's discussions slide open and shut, quickly, unless motion is reduced.
   const listSlide = () => ({
     duration: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150,
@@ -153,16 +134,7 @@
     if (confirm(`Delete “${name}” from this topic? The chat will no longer draw on it.${stays}`)) workspace.removeDoc(id)
   }
 
-  function remove(id: string, name: string) {
-    const topic = workspace.topics.find((t) => t.id === id)
-    const pdfs = topic?.docIds.length ?? 0
-    const chats = topic ? discussions(topic).length : 0
-    if (!pdfs && !chats) return workspace.deleteTopic(id)
-    const discussed = chats === 1 ? ' and its discussion' : chats ? ` and its ${chats} discussions` : ''
-    const closed = pdfs === 1 ? 'close its PDF' : pdfs ? `close its ${pdfs} PDFs` : ''
-    const question = closed && discussed ? `“${name}”${discussed}, and ${closed}` : `“${name}”${discussed}${closed && ` and ${closed}`}`
-    if (confirm(`Delete ${question}?`)) workspace.deleteTopic(id)
-  }
+  const remove = (id: string, name: string) => confirmDeleteTopic(workspace, id, name)
 
   function openChat(topicId: string, chatId: string) {
     workspace.selectTopic(topicId)
@@ -191,7 +163,7 @@
   }
 </script>
 
-<svelte:window onpointerdown={closeMenu} onkeydown={(e) => e.key === 'Escape' && ((menuId = undefined), popup && closeArchive())} />
+<svelte:window onpointerdown={closeMenu} onkeydown={(e) => e.key === 'Escape' && (menuId = undefined)} />
 
 <aside
   bind:this={sidebar}
@@ -217,13 +189,12 @@
 
   {#if expanded}
     <div id="topics-list" class="list">
-      <h2>Topics</h2>
 
       {#if shown.length === 0 && archived.length === 0}
         <p class="hint">Topics group the PDFs you study together, like lecture notes, old exams and the course book.</p>
       {/if}
 
-      <ul>
+      <ul aria-label="Topics">
         {#each shown as topic (topic.id)}
           <li class:active={topic.id === workspace.activeTopicId}>
             {#if renamingId === topic.id}
@@ -553,20 +524,6 @@
   {/if}
 
   <!-- At the bottom, in the same fixed cell as the plus, so they stay put in the collapsed strip too. -->
-  <button
-    type="button"
-    class="new settings archive-button"
-    aria-label="Archive"
-    aria-haspopup="dialog"
-    aria-expanded={popup}
-    onclick={toggleArchive}
-  >
-    <span class="plus" aria-hidden="true">
-      <svg viewBox="0 0 24 24"><path d={ARCHIVE_ICON} /></svg>
-    </span>
-    <span>Archive</span>
-    {#if archived.length}<span class="archive-count">{archived.length}</span>{/if}
-  </button>
   <button type="button" class="new settings" aria-label="Settings" onclick={() => onopensettings?.()}>
     <span class="plus" aria-hidden="true">
       <svg viewBox="0 0 24 24">
@@ -594,47 +551,6 @@
 
 <SourceCard {workspace} hover={card} placement="right" onhover={(inside) => onhover?.(inside)} />
 
-{#if popup}
-  <!-- The archived topics: open one, bring it back, or delete it. Pressing the backdrop closes it, like Settings. -->
-  <div class="archive-backdrop" role="presentation" onpointerdown={(e) => e.target === e.currentTarget && closeArchive()}>
-    <div bind:this={archiveCard} class="archive-popup" role="dialog" aria-modal="true" aria-labelledby="archive-title" tabindex="-1">
-      <header>
-        <h2 id="archive-title">Archive</h2>
-        <button type="button" class="chrome-button close" aria-label="Close archive" onclick={closeArchive}>×</button>
-      </header>
-      <ul>
-        {#each archived as topic (topic.id)}
-          <li class:active={topic.id === workspace.activeTopicId}>
-            <button
-              type="button"
-              class="topic"
-              aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
-              onclick={() => {
-                workspace.selectTopic(topic.id)
-                closeArchive()
-              }}
-            >
-              <span class="name" use:marquee><span>{topic.name}</span></span>
-            </button>
-            <button
-              type="button"
-              class="dots"
-              aria-label={`Unarchive ${topic.name}`}
-              title="Unarchive"
-              onclick={() => workspace.unarchiveTopic(topic.id)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v4H3zM5 8v12h14V8M12 17v-6M9 14l3-3 3 3" /></svg>
-            </button>
-            <button type="button" class="dots danger" aria-label={`Delete ${topic.name}`} onclick={() => remove(topic.id, topic.name)}>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
-            </button>
-          </li>
-        {/each}
-      </ul>
-    </div>
-  </div>
-{/if}
-
 <style>
   .topics-sidebar {
     /* The plus and the icons below it sit in a cell this wide, under the sidebar button in the corner. */
@@ -646,7 +562,7 @@
     position: absolute;
     inset: 0 auto 0 0;
     z-index: 30;
-    width: 15rem;
+    width: 18rem;
     box-sizing: border-box;
     padding: 0 0.375rem 0.5rem;
     border-right: 1px solid var(--border);
@@ -685,7 +601,7 @@
 
   /* The list keeps its full width while the sidebar opens, so it is revealed rather than reflowed. */
   .list {
-    width: calc(15rem - 0.75rem);
+    width: calc(18rem - 0.75rem);
     /* Takes what room is left between the buttons, and scrolls when the topics need more. */
     flex: 1 1 auto;
     min-height: 0;
@@ -796,7 +712,6 @@
   }
   li.active {
     background: var(--selected);
-    font-weight: 600;
   }
 
   li form {
@@ -932,77 +847,12 @@
   li.discussions:hover {
     background: none;
   }
+  /* Plain words, starting where the topic's name does (the list is indented 0.875rem, the name 0.5rem). */
   h3 {
-    margin: 0.25rem 0 0.125rem 0.25rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    margin: 0.5rem 0 0.375rem -0.375rem;
+    font-size: 0.8rem;
+    font-weight: normal;
     color: var(--muted);
-  }
-  .archive-button + .settings {
-    margin-top: 0;
-  }
-  .archive-count {
-    margin-left: auto;
-    margin-right: 0.5rem;
-    font-size: 0.75rem;
-    color: var(--muted);
-  }
-  .archive-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 100;
-    display: grid;
-    place-items: center;
-    padding: 1rem;
-    background: rgb(0 0 0 / 0.35);
-  }
-  .archive-popup {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    width: min(30rem, 100%);
-    max-height: 100%;
-    box-sizing: border-box;
-    overflow-y: auto;
-    padding: 1rem 1.25rem 1.5rem;
-    border: 1px solid var(--border);
-    border-radius: 0.75rem;
-    background: var(--surface);
-    box-shadow: 0 16px 48px rgb(0 0 0 / 0.3);
-    font-size: 0.9rem;
-    outline: none;
-  }
-  .archive-popup header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .archive-popup h2 {
-    margin: 0;
-    font-size: 1.1rem;
-    font-weight: 600;
-    text-transform: none;
-    letter-spacing: normal;
-    color: inherit;
-  }
-  .archive-popup .close {
-    font-size: 1.25rem;
-  }
-  .archive-popup .dots {
-    visibility: visible;
-    margin-right: 0;
-  }
-  .archive-popup .dots svg {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .archive-popup .dots.danger:hover {
-    color: var(--danger);
   }
   .list-toggle {
     display: flex;

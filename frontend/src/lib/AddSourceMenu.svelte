@@ -22,12 +22,14 @@
   const mainItems = () => items('.main-menu > [role="menuitem"], .main-menu > .sub > [role="menuitem"]')
   const subItems = () => items('.sub-menu [role="menuitem"]')
 
-  async function toggle() {
+  // Opened by the keyboard, the first item takes focus; opened by the pointer, nothing is shaded until hovered.
+  function toggle(event: MouseEvent) {
     open = !open
     subOpen = false
-    if (open) {
-      await tick()
-      mainItems()[0]?.focus()
+    if (open && event.detail === 0) {
+      const host = (event.currentTarget as HTMLElement).parentElement
+      // The menu is drawn by the next turn, even when opened from inside a key press.
+      setTimeout(() => host?.querySelector<HTMLElement>('.main-menu [role="menuitem"]')?.focus())
     }
   }
 
@@ -130,7 +132,7 @@
           aria-haspopup="menu"
           aria-expanded={subOpen}
           class:shown={subOpen}
-          onclick={() => showSources(true)}
+          onclick={(e) => showSources(e.detail === 0)}
         >
           <span class="label">Open source</span>
           <svg class="chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
@@ -197,7 +199,7 @@
     outline: none;
   }
   .sub > button:hover,
-  .sub > button:focus,
+  .sub > button:focus-visible,
   .sub > button.shown {
     background: var(--hover);
   }

@@ -1018,7 +1018,7 @@
   /* Pinned with "Fit to chat": the sidebar takes its room like the chat, and the PDF fits beside it.
      With "Fixed size" it lies over the PDF instead, and only the tab row makes way. */
   .main.beside-sidebar {
-    margin-left: 15rem;
+    margin-left: 18rem;
   }
 
   /* In the top left corner, over the sidebar, where the tab row leaves room for it. */
@@ -1055,7 +1055,7 @@
   }
   /* The sidebar lies over the PDF but not over the tab row, which moves along beside it. */
   .tabrow.sidebar-pinned {
-    padding-left: calc(15rem + 0.5rem);
+    padding-left: calc(18rem + 0.5rem);
   }
   /* Pinned beside the PDF, the sidebar holds the button, so the tab row needs no room for it. */
   .beside-sidebar .tabrow {
