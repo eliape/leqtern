@@ -947,27 +947,34 @@
   .row.active .dots {
     visibility: visible;
   }
-  /* The line down the left, and a short branch out to each title; the last one turns the corner. */
+  /* The line down the left, and a short branch out to each title; the last one turns the corner.
+     The line drops from the tip of the header's arrow: the arrow is centred 0.4rem into its 0.8rem box,
+     which starts 0.475rem left of these rows (0.875rem list indent - 0.375rem header pull + 0.5rem ul
+     margin, less 0.5rem). A branch starts just right of the line, so the two never overlap. */
+  li.discussion {
+    --trunk: calc(-0.475rem - 0.5px);
+  }
   li.discussion::before,
   li.discussion::after {
     content: '';
     position: absolute;
-    left: 0;
     pointer-events: none;
   }
   li.discussion::before {
+    left: var(--trunk);
     top: 0;
     bottom: 0;
     border-left: 1px solid var(--branch);
   }
   li.discussion::after {
+    left: calc(var(--trunk) + 1px);
+    right: calc(100% - 0.625rem);
     top: 50%;
-    width: 0.625rem;
     border-top: 1px solid var(--branch);
   }
   li.discussion:last-child::before {
     bottom: 50%;
-    width: 0.625rem;
+    right: calc(100% - 0.625rem);
     border-bottom: 1px solid var(--branch);
     border-bottom-left-radius: 0.375rem;
   }
