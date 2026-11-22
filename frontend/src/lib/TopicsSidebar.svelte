@@ -78,7 +78,8 @@
   // The topic or discussion whose actions menu (the three dots) is open.
   let menuId = $state<string>()
 
-  // The card beside the sidebar for the source under the pointer: its full title and kind.
+  // The card beside the sidebar for the topic or source under the pointer: its full title, and
+  // when it was last chatted in or what kind of document it is.
   let sidebar: HTMLElement | undefined = $state()
   const card = new CardHover()
   function showCard(id: string, row: HTMLElement) {
@@ -241,6 +242,8 @@
                 class="topic"
                 aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
                 onclick={() => workspace.selectTopic(topic.id)}
+                onpointerenter={(e) => showCard(topic.id, e.currentTarget)}
+                onpointerleave={() => card.leave()}
               >
                 <span class="name" use:marquee><span>{topic.name}</span></span>
                 <span class="count">{topic.docIds.length}</span>
