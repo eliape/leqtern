@@ -48,14 +48,14 @@
   function lastChatLabel(chat: Chat): string {
     if (chat.messages.length === 0) return 'No messages yet'
     // Saved before times were recorded.
-    if (!chat.updatedAt) return 'Last chat: not known'
+    if (!chat.updatedAt) return 'Not known'
     const minutes = Math.floor((Date.now() - chat.updatedAt) / 60_000)
-    if (minutes < 1) return 'Last chat just now'
-    if (minutes < 60) return `Last chat ${minutes} min ago`
-    if (minutes < 24 * 60) return `Last chat ${Math.floor(minutes / 60)} h ago`
+    if (minutes < 1) return 'Just now'
+    if (minutes < 60) return `${minutes} min ago`
+    if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`
     const days = Math.floor(minutes / (24 * 60))
-    if (days < 30) return `Last chat ${days} ${days === 1 ? 'day' : 'days'} ago`
-    return `Last chat ${new Date(chat.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
+    if (days < 30) return `${days} ${days === 1 ? 'day' : 'days'} ago`
+    return `${new Date(chat.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
   }
 
   function uploadedLabel(seconds: number | undefined): string {

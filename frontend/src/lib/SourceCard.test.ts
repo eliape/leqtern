@@ -20,14 +20,14 @@ describe('SourceCard for a discussion', () => {
   it('shows its full title and how long ago it was last chatted in', () => {
     const card = showFor('c1', [chat('c1', 'Limits of rational functions', Date.now() - 18 * 3600_000)])
     expect(card).toHaveTextContent('Limits of rational functions')
-    expect(card).toHaveTextContent('Last chat 18 h ago')
+    expect(card).toHaveTextContent('18 h ago')
   })
 
   it('counts minutes under an hour', () => {
-    expect(showFor('c', [chat('c', 'a', Date.now() - 5 * 60_000)])).toHaveTextContent('Last chat 5 min ago')
+    expect(showFor('c', [chat('c', 'a', Date.now() - 5 * 60_000)])).toHaveTextContent('5 min ago')
   })
 
   it('counts days after a day', () => {
-    expect(showFor('c', [chat('c', 'a', Date.now() - 3 * 86_400_000)])).toHaveTextContent('Last chat 3 days ago')
+    expect(showFor('c', [chat('c', 'a', Date.now() - 3 * 86_400_000)])).toHaveTextContent('3 days ago')
   })
 })
