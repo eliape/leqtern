@@ -226,7 +226,7 @@
   // Tabs stay mounted once opened, so switching back to one keeps its page,
   // zoom and scroll position without re-rendering.
   let mounted = $state<string[]>([])
-  const panes: Record<string, DocPane> = {}
+  const panes: Record<string, DocPane> = $state({})
 
   let doc = $derived(workspace.activeDoc)
 
