@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CardHover } from './cardHover.svelte'
+  import { lastChatLabel } from './lastChat'
   import { chatTitle, type Chat, type Workspace } from './workspace.svelte'
 
   type Props = {
@@ -42,20 +43,6 @@
       const chat = topic.chats.find((c) => c.id === id)
       if (chat) return chat
     }
-  }
-
-  /** When a question was last sent in the discussion, as "18 h ago". */
-  function lastChatLabel(chat: Chat): string {
-    if (chat.messages.length === 0) return 'No messages yet'
-    // Saved before times were recorded.
-    if (!chat.updatedAt) return 'Last chat: not known'
-    const minutes = Math.floor((Date.now() - chat.updatedAt) / 60_000)
-    if (minutes < 1) return 'Last chat just now'
-    if (minutes < 60) return `Last chat ${minutes} min ago`
-    if (minutes < 24 * 60) return `Last chat ${Math.floor(minutes / 60)} h ago`
-    const days = Math.floor(minutes / (24 * 60))
-    if (days < 30) return `Last chat ${days} ${days === 1 ? 'day' : 'days'} ago`
-    return `Last chat ${new Date(chat.updatedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
   }
 
   function uploadedLabel(seconds: number | undefined): string {

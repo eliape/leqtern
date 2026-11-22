@@ -543,6 +543,36 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
   })
 
+  it('opens a closed source, or uploads one, from the + menu in the tab row', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Close a.pdf' }))
+    const add = screen.getByRole('button', { name: /^Add a source to/ })
+    expect(add).not.toHaveAttribute('title')
+    await fireEvent.click(add)
+    const menu = within(screen.getByRole('menu', { name: 'Add a source' }))
+    await fireEvent.pointerEnter(menu.getByRole('menuitem', { name: /Open source/ }).parentElement!)
+    const list = within(await screen.findByRole('menu', { name: /^Sources in/ }))
+    expect(list.getAllByRole('menuitem').map((b) => b.textContent?.trim())).toEqual(['a.pdf', 'b.pdf'])
+    await fireEvent.click(list.getByRole('menuitem', { name: 'a.pdf' }))
+    expect(await screen.findByRole('tab', { name: 'a.pdf', selected: true })).toBeInTheDocument()
+    expect(screen.queryByRole('menu', { name: 'Add a source' })).not.toBeInTheDocument()
+    // An open one just becomes the shown tab.
+    await fireEvent.click(add)
+    await fireEvent.click(screen.getByRole('menuitem', { name: /Open source/ }))
+    await fireEvent.click(within(screen.getByRole('menu', { name: /^Sources in/ })).getByRole('menuitem', { name: 'b.pdf' }))
+    expect(screen.getByRole('tab', { name: 'b.pdf', selected: true })).toBeInTheDocument()
+    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    // Upload source picks a file, as the + did before.
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click')
+    await fireEvent.click(add)
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Upload source…' }))
+    expect(click).toHaveBeenCalled()
+    click.mockRestore()
+  })
+
   it('renames a source from its menu, tab included', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))
