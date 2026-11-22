@@ -725,7 +725,6 @@
                 type="button"
                 role="tab"
                 aria-selected={id === doc?.id}
-                title={tab.name}
                 onclick={() => workspace.selectDoc(id)}>{tab.name}</button
               >
               {#if workspace.indexing[id]?.status === 'error'}

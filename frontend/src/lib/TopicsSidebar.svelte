@@ -224,7 +224,7 @@
     >
   </div>
 
-  <button type="button" class="new" aria-label="New topic" title="New topic" onclick={newTopic}>
+  <button type="button" class="new" aria-label="New topic" title={expanded ? undefined : 'New topic'} onclick={newTopic}>
     <span class="plus" aria-hidden="true">＋</span>
     {#if expanded}<span class="fade">New topic</span>{/if}
   </button>
@@ -500,7 +500,7 @@
     aria-label="Archive"
     aria-haspopup="dialog"
     aria-expanded={popup}
-    title="Archive"
+    title={expanded ? undefined : 'Archive'}
     onclick={toggleArchive}
   >
     <span class="plus" aria-hidden="true">
@@ -509,7 +509,7 @@
     {#if expanded}<span class="fade">Archive</span>{/if}
     {#if expanded && archived.length}<span class="fade archive-count">{archived.length}</span>{/if}
   </button>
-  <button type="button" class="new settings" aria-label="Settings" title="Settings" onclick={() => onopensettings?.()}>
+  <button type="button" class="new settings" aria-label="Settings" title={expanded ? undefined : 'Settings'} onclick={() => onopensettings?.()}>
     <span class="plus" aria-hidden="true">
       <svg viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="3" />
@@ -545,7 +545,6 @@
               type="button"
               class="topic"
               aria-current={topic.id === workspace.activeTopicId ? 'true' : undefined}
-              title={topic.name}
               onclick={() => {
                 workspace.selectTopic(topic.id)
                 closeArchive()
@@ -562,7 +561,7 @@
             >
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v4H3zM5 8v12h14V8M12 17v-6M9 14l3-3 3 3" /></svg>
             </button>
-            <button type="button" class="dots danger" aria-label={`Delete ${topic.name}`} title="Delete" onclick={() => remove(topic.id, topic.name)}>
+            <button type="button" class="dots danger" aria-label={`Delete ${topic.name}`} onclick={() => remove(topic.id, topic.name)}>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
             </button>
           </li>
