@@ -6,6 +6,7 @@
   // A box with a lid.
   const ARCHIVE_ICON = 'M3 4h18v4H3zM5 8v12h14V8M10 12h4'
   import { marquee } from './marquee'
+  import DiscussionsDialog from './DiscussionsDialog.svelte'
   import SourceCard from './SourceCard.svelte'
   import { CardHover } from './cardHover.svelte'
   import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
@@ -169,6 +170,10 @@
     onopenchat?.()
   }
 
+  // Past this many, the list ends in "View all", which opens every discussion in a dialog.
+  const MAX_LISTED = 9
+  let allDiscussionsFrom = $state<string>()
+
   function newDiscussion(topicId: string) {
     workspace.newChat(topicId)
     onopenchat?.()
@@ -322,6 +327,7 @@
           </li>
           {#if topic.id === workspace.activeTopicId && !(renamingId === topic.id && renamingKind === 'topic')}
             {@const listed = discussions(topic)}
+            {@const visible = listed.length > MAX_LISTED ? listed.slice(0, MAX_LISTED) : listed}
             {@const discussionsOpen = topic.discussionsOpen !== false}
             {@const sourcesOpen = !!topic.sourcesOpen}
             <!-- The open topic's discussions, on a soft line that forks out to each title. -->
@@ -349,7 +355,7 @@
                     </button>
                   </div>
                 </li>
-                {#each listed as chat (chat.id)}
+                {#each visible as chat (chat.id)}
                   {@const title = chatTitle(chat)}
                   {@const current = chatOpen && chat.id === chatOf(topic).id}
                   <li class="discussion">
@@ -428,6 +434,15 @@
                     {/if}
                   </li>
                 {/each}
+                {#if visible.length < listed.length}
+                  <li class="discussion">
+                    <div class="row">
+                      <button type="button" class="topic view-all" onclick={() => (allDiscussionsFrom = topic.id)}>
+                        <span class="name">View all</span>
+                      </button>
+                    </div>
+                  </li>
+                {/if}
               </ul>
               {/if}
             </li>
@@ -564,6 +579,18 @@
     <span>Settings</span>
   </button>
 </aside>
+
+{#if allDiscussionsFrom}
+  <DiscussionsDialog
+    {workspace}
+    topicId={allDiscussionsFrom}
+    onpick={(topicId, chatId) => {
+      allDiscussionsFrom = undefined
+      openChat(topicId, chatId)
+    }}
+    onclose={() => (allDiscussionsFrom = undefined)}
+  />
+{/if}
 
 <SourceCard {workspace} hover={card} placement="right" onhover={(inside) => onhover?.(inside)} />
 
@@ -1039,6 +1066,10 @@
   .row .topic {
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
+  }
+  /* An action rather than a discussion, so a shade lighter than the titles above it. */
+  .view-all {
+    color: var(--muted);
   }
   .new-discussion {
     gap: 0.375rem;
