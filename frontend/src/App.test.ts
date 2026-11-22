@@ -510,6 +510,26 @@ describe('App', () => {
     expect(await screen.findByRole('tab', { name: 'a.pdf', selected: true })).toBeInTheDocument()
   })
 
+  it('shows a card with the name and kind when hovering a source', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await pick(pdf('b.pdf', 'b'))
+    await screen.findByRole('tab', { name: 'b.pdf' })
+    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
+    const sources = within(screen.getByRole('list', { name: 'Sources' }))
+    const row = (name: RegExp) => sources.getByRole('button', { name }).parentElement!
+    await fireEvent.pointerEnter(row(/^a\.pdf/))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('a.pdf')
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/Not indexed yet|Could not be indexed/)
+    // Moving straight to another source swaps the card at once.
+    await fireEvent.pointerLeave(row(/^a\.pdf/))
+    await fireEvent.pointerEnter(row(/^b\.pdf/))
+    expect(screen.getByRole('tooltip')).toHaveTextContent('b.pdf')
+    await fireEvent.pointerLeave(row(/^b\.pdf/))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
   it('opens the file picker from Upload source, and toggles the lists', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))

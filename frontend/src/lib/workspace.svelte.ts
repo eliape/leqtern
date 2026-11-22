@@ -81,6 +81,9 @@ export type IndexState = {
   pagesDone: number
   pageCount: number
   error?: string
+  /** The document's title and kind (lecture notes, exam, …), from its index once it is ready. */
+  title?: string
+  kind?: string
 }
 
 /** The backend calls indexing uses. Tests pass fakes. */
@@ -400,7 +403,15 @@ export class Workspace {
     if (!known) this.indexing[docId] = { status: 'uploading', pagesDone: 0, pageCount: 0 }
     const update = (s: IndexStatus) => {
       if (!(docId in this.docs)) return false
-      this.indexing[docId] = { serverId: s.id, status: s.status, pagesDone: s.pages_done, pageCount: s.page_count, error: s.error }
+      this.indexing[docId] = {
+        serverId: s.id,
+        status: s.status,
+        pagesDone: s.pages_done,
+        pageCount: s.page_count,
+        error: s.error,
+        title: s.title || undefined,
+        kind: s.kind || undefined,
+      }
       return s.status !== 'ready' && s.status !== 'error'
     }
     try {
