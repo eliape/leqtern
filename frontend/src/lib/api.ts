@@ -161,6 +161,9 @@ export type IndexStatus = {
   /** From the index, once it is ready: the document's own title and what kind of document it is. */
   title?: string
   kind?: string
+  /** The name the PDF was first uploaded under, and when (Unix seconds). */
+  file_name?: string
+  uploaded?: number
 }
 
 /** Give the backend a PDF to keep and index. Adding the same file again is cheap: it is stored once. */

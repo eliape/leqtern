@@ -6,6 +6,8 @@
   // A box with a lid.
   const ARCHIVE_ICON = 'M3 4h18v4H3zM5 8v12h14V8M10 12h4'
   import { marquee } from './marquee'
+  import SourceCard from './SourceCard.svelte'
+  import { CardHover } from './sourceCard.svelte'
   import { chatOf, chatTitle, discussions, type Workspace } from './workspace.svelte'
 
   type Props = {
@@ -78,60 +80,18 @@
 
   // The card beside the sidebar for the source under the pointer: its full title and kind.
   let sidebar: HTMLElement | undefined = $state()
-  let hoverCard = $state<{ id: string; top: number; left: number }>()
-  // It appears after a short rest on a source. Once showing, it slides to the next source at once,
-  // and only goes when the pointer has left the sources for a moment (the gap between rows doesn't count).
-  const CARD_DELAY_MS = 400
-  const CARD_GRACE_MS = 120
-  let showTimer: ReturnType<typeof setTimeout> | undefined
-  let hideTimer: ReturnType<typeof setTimeout> | undefined
-  function clearCardTimers() {
-    clearTimeout(showTimer)
-    clearTimeout(hideTimer)
-  }
-  function closeCard() {
-    clearCardTimers()
-    hoverCard = undefined
-  }
+  const card = new CardHover()
   function showCard(id: string, row: HTMLElement) {
-    clearCardTimers()
-    const place = () => {
+    card.show(id, () => {
       const box = row.getBoundingClientRect()
-      hoverCard = { id, top: box.top + box.height / 2, left: (sidebar?.getBoundingClientRect().right ?? box.right) + 8 }
-    }
-    if (hoverCard) place()
-    else showTimer = setTimeout(place, CARD_DELAY_MS)
+      return { x: (sidebar?.getBoundingClientRect().right ?? box.right) + 8, y: box.top + box.height / 2 }
+    })
   }
-  function hideCard() {
-    clearTimeout(showTimer)
-    if (hoverCard) hideTimer = setTimeout(() => (hoverCard = undefined), CARD_GRACE_MS)
-  }
+  const closeCard = () => card.close()
   $effect(() => {
-    if (!expanded || menuId) closeCard()
+    if (!expanded || menuId) card.close()
   })
-  $effect(() => clearCardTimers)
-  /** The page count after the kind, once known. While indexing, the kind line already counts pages. */
-  function pagesLabel(id: string): string {
-    const state = workspace.indexing[id]
-    if (!state?.pageCount || state.status === 'indexing') return ''
-    return ` · ${state.pageCount} ${state.pageCount === 1 ? 'page' : 'pages'}`
-  }
-  function kindLabel(id: string): string {
-    const state = workspace.indexing[id]
-    if (state?.kind) return state.kind[0].toUpperCase() + state.kind.slice(1)
-    switch (state?.status) {
-      case 'uploading':
-      case 'queued':
-        return 'Not indexed yet'
-      case 'indexing':
-        return state.pageCount ? `Indexing, ${state.pagesDone} of ${state.pageCount} pages` : 'Indexing…'
-      case 'error':
-        return 'Could not be indexed'
-      default:
-        // Indexed before kinds were recorded, or not known to the backend yet.
-        return state?.status === 'ready' ? 'PDF' : 'Not indexed yet'
-    }
-  }
+  $effect(() => () => card.clear())
 
   function closeMenu(event: Event) {
     const target = event.target as Element | null
@@ -491,7 +451,7 @@
                   </div>
                 </li>
                 {#each topic.docIds as id (id)}
-                  {@const name = workspace.docs[id]?.name ?? ''}
+                  {@const name = workspace.docName(id)}
                   <li class="discussion">
                     {#if renamingId === id}
                       <form
@@ -514,7 +474,7 @@
                       class="row"
                       role="presentation"
                       onpointerenter={(e) => showCard(id, e.currentTarget)}
-                      onpointerleave={hideCard}
+                      onpointerleave={() => card.leave()}
                     >
                       <button type="button" class="topic" onclick={() => workspace.openDoc(id)}>
                         <span class="name" use:marquee><span>{name}</span></span>
@@ -599,13 +559,7 @@
   </button>
 </aside>
 
-{#if hoverCard && workspace.docs[hoverCard.id]}
-  {@const doc = workspace.docs[hoverCard.id]}
-  <div class="source-card" role="tooltip" style:top="{hoverCard.top}px" style:left="{hoverCard.left}px">
-    <div class="source-title">{(!doc.renamed && workspace.indexing[hoverCard.id]?.title) || doc.name}</div>
-    <div class="source-kind">{kindLabel(hoverCard.id)}{pagesLabel(hoverCard.id)}</div>
-  </div>
-{/if}
+<SourceCard {workspace} hover={card} placement="right" onhover={(inside) => onhover?.(inside)} />
 
 {#if popup}
   <!-- The archived topics: open one, bring it back, or delete it. Pressing the backdrop closes it, like Settings. -->
@@ -691,8 +645,7 @@
     box-shadow: none;
   }
   @media (prefers-reduced-motion: reduce) {
-    .topics-sidebar,
-    .source-card {
+    .topics-sidebar {
       transition: none;
     }
   }
@@ -1081,34 +1034,6 @@
   .row .topic {
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
-  }
-  /* Beside the sidebar, centred on the source under the pointer. */
-  .source-card {
-    position: fixed;
-    z-index: 40;
-    transform: translateY(-50%);
-    /* Always this wide: a long title wraps rather than widening the card. */
-    box-sizing: border-box;
-    width: 16rem;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
-    pointer-events: none;
-    /* Slides from one source to the next. */
-    transition: top 0.15s ease;
-  }
-  .source-title {
-    font-size: 0.85rem;
-    font-weight: 600;
-    line-height: 1.3;
-    overflow-wrap: anywhere;
-  }
-  .source-kind {
-    margin-top: 0.125rem;
-    font-size: 0.75rem;
-    color: var(--muted);
   }
   .new-discussion {
     gap: 0.375rem;

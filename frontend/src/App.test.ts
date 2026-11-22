@@ -558,6 +558,25 @@ describe('App', () => {
     expect(within(screen.getByRole('list', { name: 'Sources' })).getByRole('button', { name: /^Lecture notes/ })).toBeInTheDocument()
   })
 
+  it('shows the same card below a hovered tab, with the file details behind its icon', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    const tab = (await screen.findByRole('tab', { name: 'a.pdf' })).parentElement!
+    await fireEvent.pointerEnter(tab)
+    const card = await screen.findByRole('tooltip', {}, { timeout: 1000 })
+    expect(card).toHaveTextContent('a.pdf')
+    expect(within(card).getByRole('button', { name: 'File details' })).toBeInTheDocument()
+    expect(card).toHaveTextContent('File')
+    expect(card).toHaveTextContent('Uploaded')
+    // Moving onto the card keeps it.
+    await fireEvent.pointerLeave(tab)
+    await fireEvent.pointerEnter(card)
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(screen.getByRole('tooltip')).toBe(card)
+    await fireEvent.pointerLeave(card)
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
+  })
+
   it('opens the file picker from Upload source, and toggles the lists', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))
