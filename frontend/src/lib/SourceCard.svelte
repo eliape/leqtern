@@ -37,13 +37,49 @@
     }
   }
 
+  /** When a question was last sent in any of the topic's discussions, as "18 h ago". */
+  function lastChatLabel(topicId: string): string {
+    const topic = workspace.topics.find((t) => t.id === topicId)
+    const chats = topic?.chats.filter((c) => c.messages.length) ?? []
+    if (chats.length === 0) return 'No chats yet'
+    const last = Math.max(...chats.map((c) => c.updatedAt))
+    // Saved before times were recorded.
+    if (!last) return 'Last chat: not known'
+    const minutes = Math.floor((Date.now() - last) / 60_000)
+    if (minutes < 1) return 'Last chat just now'
+    if (minutes < 60) return `Last chat ${minutes} min ago`
+    if (minutes < 24 * 60) return `Last chat ${Math.floor(minutes / 60)} h ago`
+    const days = Math.floor(minutes / (24 * 60))
+    if (days < 30) return `Last chat ${days} ${days === 1 ? 'day' : 'days'} ago`
+    return `Last chat ${new Date(last).toLocaleDateString(undefined, { dateStyle: 'medium' })}`
+  }
+
   function uploadedLabel(seconds: number | undefined): string {
     if (!seconds) return 'Not known yet'
     return new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
   }
 </script>
 
-{#if hover.spot && workspace.docs[hover.spot.id]}
+{#if hover.spot && workspace.topics.some((t) => t.id === hover.spot?.id)}
+  {@const topic = workspace.topics.find((t) => t.id === hover.spot?.id)!}
+  <div
+    class="source-card topic-card {placement}"
+    role="tooltip"
+    style:top="{hover.spot.y}px"
+    style:left="{hover.spot.x}px"
+    onpointerenter={() => {
+      hover.keep()
+      onhover?.(true)
+    }}
+    onpointerleave={() => {
+      hover.leave()
+      onhover?.(false)
+    }}
+  >
+    <div class="source-title">{topic.name}</div>
+    <div class="source-kind">{lastChatLabel(topic.id)}</div>
+  </div>
+{:else if hover.spot && workspace.docs[hover.spot.id]}
   {@const id = hover.spot.id}
   {@const state = workspace.indexing[id]}
   <div
@@ -121,6 +157,10 @@
       transition: none;
       animation: none !important;
     }
+  }
+  /* No (i) icon in the corner, so no room kept for it. */
+  .source-card.topic-card {
+    padding-right: 0.75rem;
   }
   .source-title {
     font-size: 0.85rem;

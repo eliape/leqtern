@@ -543,6 +543,20 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
   })
 
+  it('shows a card with the full name and the last chat when hovering a topic', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await screen.findByRole('tab', { name: 'a.pdf' })
+    await showTopics()
+    const topic = document.querySelector<HTMLElement>('#topics-list li > button.topic')!
+    await fireEvent.pointerEnter(topic)
+    const card = await screen.findByRole('tooltip', {}, { timeout: 1000 })
+    expect(card).toHaveTextContent(topic.querySelector('.name')!.textContent!)
+    expect(card).toHaveTextContent('No chats yet')
+    await fireEvent.pointerLeave(topic)
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
+  })
+
   it('renames a source from its menu, tab included', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))
