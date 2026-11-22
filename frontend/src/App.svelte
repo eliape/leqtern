@@ -226,7 +226,7 @@
   // Tabs stay mounted once opened, so switching back to one keeps its page,
   // zoom and scroll position without re-rendering.
   let mounted = $state<string[]>([])
-  const panes: Record<string, DocPane> = {}
+  const panes: Record<string, DocPane> = $state({})
 
   let doc = $derived(workspace.activeDoc)
 
@@ -270,83 +270,118 @@
   })
 
   // A mouse wheel only scrolls up and down, so let it scroll the tabs sideways.
-  // Reordering tabs by dragging them. `dropAt` is the place in the row the tab would land, shown
-  // as a line (`dropX`, in the scrolled row's own pixels) between two tabs.
-  const TAB_TYPE = 'application/x-leqtern-tab'
+  // Reordering tabs by dragging them. The tab itself follows the pointer, and the tabs it passes
+  // slide aside to show where it will land. Dropping slides it into that place, then the order is
+  // saved; with the slides removed at the same moment, nothing on screen jumps.
+  const DRAG_START_PX = 4
+  const SETTLE_MS = 150
   let dragTab = $state<string>()
-  let dropAt = $state<number>()
-  let dropX = $state(0)
-  // While a tab is dragged, the PDF, the chat and the sidebar ignore the pointer, so the browser
-  // has nothing to auto-scroll when the drag nears the top or bottom of the window.
+  let dragDx = $state(0)
+  // Where the tab would land, counted among the other tabs.
+  let dragTo = $state(0)
+  let dragSettling = $state(false)
+  // While a tab is dragged, the PDF, the chat and the sidebar ignore the pointer.
   let tabDragging = $state(false)
+  // The row's layout when the drag started; transforms don't change offsetLeft.
+  let dragGeometry: { lefts: number[]; widths: number[]; from: number; step: number } | undefined
+  let suppressClick = false
 
-  // A small card to carry along, in place of the browser's picture of the tab's text. It is made
-  // outside the page's styles, so it is styled here, with the page's colours.
-  function dragCard(name: string): HTMLElement {
-    const card = document.createElement('div')
-    const icon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none;color:var(--accent)"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/></svg>'
-    card.innerHTML = `${icon}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>`
-    card.lastElementChild!.textContent = name
-    card.style.cssText =
-      'position:fixed;top:-100px;left:-100px;display:flex;align-items:center;gap:0.5rem;max-width:14rem;' +
-      'padding:0.4rem 0.7rem;border:1px solid var(--border);border-radius:0.5rem;background:var(--surface);' +
-      'color:inherit;font:0.85rem system-ui,sans-serif;box-shadow:0 6px 18px rgb(0 0 0 / 0.22);pointer-events:none'
-    return card
+  function tabPointerDown(event: PointerEvent, id: string) {
+    if (event.button !== 0 || dragTab !== undefined || !tabsEl) return
+    if ((event.target as Element).closest('.close, button.index-status')) return
+    const startX = event.clientX
+    const row = tabsEl
+    let started = false
+    const move = (e: PointerEvent) => {
+      const dx = e.clientX - startX
+      if (!started) {
+        if (Math.abs(dx) < DRAG_START_PX) return
+        started = true
+        beginTabDrag(id, row)
+      }
+      if (!dragGeometry) return
+      const { lefts, widths, from } = dragGeometry
+      // Keep the tab inside the row.
+      const min = -lefts[from]
+      const max = lefts[lefts.length - 1] + widths[widths.length - 1] - (lefts[from] + widths[from])
+      dragDx = Math.max(min, Math.min(max, dx))
+      const centre = lefts[from] + widths[from] / 2 + dragDx
+      dragTo = lefts.filter((l, i) => i !== from && l + widths[i] / 2 <= centre).length
+    }
+    const stop = (drop: boolean) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('keydown', escape, true)
+      if (started) finishTabDrag(drop)
+    }
+    const up = () => stop(true)
+    const cancel = () => stop(false)
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      stop(false)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('keydown', escape, true)
   }
 
-  function startTabDrag(event: DragEvent, id: string) {
+  function beginTabDrag(id: string, row: HTMLElement) {
+    tabCard.close()
+    const tabs = [...row.querySelectorAll<HTMLElement>('.tab')]
+    const from = (workspace.activeTopic?.openDocIds ?? []).indexOf(id)
+    if (from === -1 || tabs.length === 0) return
+    const lefts = tabs.map((t) => t.offsetLeft)
+    const widths = tabs.map((t) => t.offsetWidth)
+    const gap = parseFloat(getComputedStyle(row).columnGap) || 0
+    dragGeometry = { lefts, widths, from, step: widths[from] + gap }
     dragTab = id
-    const data = event.dataTransfer
-    if (!data) return
-    data.setData(TAB_TYPE, id)
-    data.effectAllowed = 'move'
-    const card = dragCard(workspace.docName(id))
-    document.body.appendChild(card)
-    data.setDragImage(card, 16, 16)
-    // The browser has taken its picture by the next turn.
+    dragDx = 0
+    dragTo = from
+    tabDragging = true
+    // The release would otherwise click the tab under the pointer.
+    suppressClick = true
+  }
+
+  function finishTabDrag(drop: boolean) {
+    const id = dragTab
+    const geometry = dragGeometry
+    if (id === undefined || !geometry) return endTabDrag()
+    const { lefts, widths, from } = geometry
+    const to = drop ? dragTo : from
+    // Slide into the place it lands in, then save the order.
+    const landing = to >= from ? lefts[to] + widths[to] - widths[from] : lefts[to]
+    dragTo = to
+    dragSettling = true
+    dragDx = landing - lefts[from]
     setTimeout(() => {
-      card.remove()
-      // Not at once: changing the page while the drag starts can cancel it.
-      if (dragTab === id) tabDragging = true
-    })
-  }
-
-  /** Where in the row a drag at this x lands, and the x of the line that shows it. */
-  function dragTabOver(event: DragEvent) {
-    if (dragTab === undefined || !tabsEl) return
-    event.preventDefault()
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-    const tabs = [...tabsEl.querySelectorAll<HTMLElement>('.tab')]
-    let at = tabs.findIndex((t) => {
-      const box = t.getBoundingClientRect()
-      return event.clientX < box.left + box.width / 2
-    })
-    if (at === -1) at = tabs.length
-    dropAt = at
-    const next = tabs[at]
-    const before = tabs[at - 1]
-    dropX = next && before ? (before.offsetLeft + before.offsetWidth + next.offsetLeft) / 2 : next ? next.offsetLeft - 1 : before ? before.offsetLeft + before.offsetWidth + 1 : 0
-  }
-
-  function dropTab(event: DragEvent) {
-    if (dragTab === undefined) return
-    event.preventDefault()
-    const from = (workspace.activeTopic?.openDocIds ?? []).indexOf(dragTab)
-    if (dropAt !== undefined && from !== -1) workspace.moveTab(dragTab, dropAt > from ? dropAt - 1 : dropAt)
-    endTabDrag()
+      if (to !== from) workspace.moveTab(id, to)
+      endTabDrag()
+    }, SETTLE_MS)
+    // A click, if any, comes straight after the release.
+    setTimeout(() => (suppressClick = false))
   }
 
   function endTabDrag() {
     dragTab = undefined
+    dragGeometry = undefined
+    dragDx = 0
+    dragSettling = false
     tabDragging = false
-    dropAt = undefined
   }
 
-  // The line shows only where dropping would change the order.
-  const dropLine = $derived.by(() => {
-    const from = dragTab === undefined ? -1 : (workspace.activeTopic?.openDocIds.indexOf(dragTab) ?? -1)
-    return dropAt !== undefined && from !== -1 && dropAt !== from && dropAt !== from + 1
-  })
+  /** How far a tab is moved: the dragged one with the pointer, the others aside to make room. */
+  function tabShift(index: number): string | undefined {
+    if (dragTab === undefined || !dragGeometry) return undefined
+    const { from, step } = dragGeometry
+    if (index === from) return `translateX(${dragDx}px)`
+    if (index > from && index <= dragTo) return `translateX(${-step}px)`
+    if (index < from && index >= dragTo) return `translateX(${step}px)`
+    return undefined
+  }
 
   function scrollTabs(event: WheelEvent) {
     if (event.deltaX !== 0 || event.ctrlKey || !tabsEl) return
@@ -779,23 +814,26 @@
             tabCard.close()
             scrollTabs(e)
           }}
-          ondragover={dragTabOver}
-          ondrop={dropTab}
+          class:reordering={dragTab !== undefined}
+          onclickcapture={(e) => {
+            if (!suppressClick) return
+            e.preventDefault()
+            e.stopPropagation()
+          }}
         >
-          {#each workspace.activeTopic.openDocIds as id (id)}
+          {#each workspace.activeTopic.openDocIds as id, index (id)}
             <div
               class="tab"
               class:active={id === doc?.id}
               class:dragged={id === dragTab}
+              class:settling={id === dragTab && dragSettling}
               role="presentation"
-              draggable="true"
-              onpointerenter={(e) => showTabCard(id, e.currentTarget)}
-              onpointerleave={() => tabCard.leave()}
-              ondragstart={(e) => {
-                tabCard.close()
-                startTabDrag(e, id)
+              style:transform={tabShift(index)}
+              onpointerdown={(e) => tabPointerDown(e, id)}
+              onpointerenter={(e) => {
+                if (dragTab === undefined) showTabCard(id, e.currentTarget)
               }}
-              ondragend={endTabDrag}
+              onpointerleave={() => tabCard.leave()}
             >
               <button
                 type="button"
@@ -815,7 +853,6 @@
               </button>
             </div>
           {/each}
-          {#if dropLine}<div class="drop-line" style:left={`${dropX}px`} aria-hidden="true"></div>{/if}
         </div>
         <button
           type="button"
@@ -1009,6 +1046,9 @@
     padding: 0.25rem 0.5rem;
     border-bottom: 1px solid var(--border);
     background: var(--sidebar-bg);
+    /* Above the tabs' hover card, which slides out from under it. */
+    position: relative;
+    z-index: 26;
     /* Room on the left for the sidebar button in the corner. */
     padding-left: 2.75rem;
     transition:
@@ -1062,19 +1102,33 @@
     color: var(--muted);
     font-size: 0.9rem;
   }
-  .tab.dragged {
-    opacity: 0.45;
+  /* While a tab is dragged, the others slide aside; the dragged one follows the pointer, lifted. */
+  .tabs.reordering {
+    user-select: none;
+    cursor: grabbing;
   }
-  /* Where the dragged tab will land: a line between two tabs. */
-  .drop-line {
-    position: absolute;
-    top: 0.125rem;
-    bottom: 0.125rem;
-    width: 2px;
-    margin-left: -1px;
-    border-radius: 1px;
-    background: var(--accent);
-    pointer-events: none;
+  .tabs.reordering .tab {
+    transition: transform 150ms ease;
+  }
+  .tabs.reordering .tab.dragged {
+    position: relative;
+    z-index: 1;
+    background: var(--surface);
+    color: inherit;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 0.18);
+    transition: none;
+  }
+  .tabs.reordering .tab.dragged.settling {
+    transition: transform 150ms ease;
+  }
+  .tabs.reordering .tab [role='tab'] {
+    cursor: grabbing;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tabs.reordering .tab,
+    .tabs.reordering .tab.dragged.settling {
+      transition: none;
+    }
   }
   .tab:hover,
   .tab.active {
