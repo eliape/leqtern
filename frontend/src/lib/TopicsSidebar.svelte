@@ -855,6 +855,13 @@
     padding: 0 0 0.375rem 0.875rem;
     font-weight: normal;
   }
+  /* Sources follows Discussions closely: the two read as one block under the topic. */
+  li.discussions:has(+ li.sources) {
+    padding-bottom: 0;
+  }
+  li.sources h3 {
+    margin-top: 0.125rem;
+  }
   li.discussions:hover {
     background: none;
   }
