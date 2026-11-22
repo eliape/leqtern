@@ -114,8 +114,48 @@
     saveTimer = setTimeout(saveNow, 500)
   })
 
-  // Every load starts with the topics open and the chat closed.
-  let sidebarOpen = $state(true)
+  // The topics sidebar peeks out while its button or the sidebar itself is hovered, and stays
+  // once pinned by clicking the button. Pinned is remembered in this browser.
+  const PINNED_KEY = 'leqtern.sidebarPinned'
+  function savedSidebarPinned() {
+    try {
+      return localStorage.getItem(PINNED_KEY) === '1'
+    } catch {
+      return false
+    }
+  }
+  let sidebarPinned = $state(savedSidebarPinned())
+  let sidebarPeek = $state(false)
+  const sidebarOpen = $derived(sidebarPinned || sidebarPeek)
+  let peekTimer: ReturnType<typeof setTimeout> | undefined
+  const PEEK_GRACE_MS = 300
+  function hoverSidebar(inside: boolean) {
+    clearTimeout(peekTimer)
+    if (inside) {
+      sidebarPeek = true
+      return
+    }
+    peekTimer = setTimeout(() => {
+      // Not while a name is being typed in it: the box would lose what was typed.
+      if (document.querySelector('#topics-sidebar input:focus')) return
+      sidebarPeek = false
+    }, PEEK_GRACE_MS)
+  }
+  function hideSidebarPeek() {
+    clearTimeout(peekTimer)
+    sidebarPeek = false
+  }
+  function togglePin() {
+    sidebarPinned = !sidebarPinned
+    // Unpinned with the pointer still on the button: it goes on peeking until the pointer leaves.
+    sidebarPeek = !sidebarPinned
+    try {
+      localStorage.setItem(PINNED_KEY, sidebarPinned ? '1' : '0')
+    } catch {
+      // Not remembered, then.
+    }
+  }
+  $effect(() => () => clearTimeout(peekTimer))
   let settingsOpen = $state(false)
   // Whether the PDF's zoom follows the chat opening and closing. Set in Settings.
   let zoomFollowsChat = $state(savedZoomFollowsChat())
@@ -471,8 +511,8 @@
     const skipped = list.filter((f) => !isPdfFile(f)).map((f) => f.name)
     error = skipped.length ? `${skipped.join(', ')} ${skipped.length === 1 ? 'is' : 'are'} not a PDF.` : ''
     if (!pdfs.length) return
-    // Get the topics out of the way of the new PDFs, once.
-    sidebarOpen = false
+    // Get a peeking sidebar out of the way of the new PDFs.
+    hideSidebarPeek()
     // Read them all first, so a slow file can't reorder the tabs.
     const loaded = await Promise.all(pdfs.map(async (f) => [f.name, new Uint8Array(await f.arrayBuffer())] as const))
     const added = loaded.map(([name, data]) => workspace.addDoc(name, data))
@@ -617,19 +657,34 @@
   }}
   ondrop={onDrop}
   onpointerdown={(e) => {
-    // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) folds the topics away.
-    // A pointer shortcut: the menu button does the same by keyboard.
+    // Pressing anywhere but the sidebar (the PDF, the tabs, the chat) ends a peek. Pinned, it stays.
     const target = e.target as Element
-    if (!target.closest('#topics-sidebar, .settings-dialog, .topic-profile-dialog, .flashcard-dialog, .flashcard-manager')) {
-      sidebarOpen = false
+    if (!target.closest('#topics-sidebar, .sidebar-toggle, .settings-dialog, .topic-profile-dialog, .flashcard-dialog, .flashcard-manager')) {
+      hideSidebarPeek()
     }
     // The outline closes too, unless the press is in it or on its button.
     if (!target.closest('#topics-sidebar, #doc-outline, .outline-toggle')) outlineOpen = false
   }}
 >
+  <!-- Stays in the top left corner whether the sidebar is shown or not; Leqtern slides in beside it. -->
+  <button
+    type="button"
+    class="icon-button sidebar-toggle"
+    class:pressed={sidebarPinned}
+    aria-label={sidebarPinned ? 'Hide topics' : 'Show topics'}
+    aria-expanded={sidebarPinned}
+    aria-controls="topics-sidebar"
+    onclick={togglePin}
+    onpointerenter={() => hoverSidebar(true)}
+    onpointerleave={() => hoverSidebar(false)}
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9 4v16" /></svg>
+  </button>
   <TopicsSidebar
     {workspace}
-    bind:open={sidebarOpen}
+    open={sidebarOpen}
+    pinned={sidebarPinned}
+    onhover={hoverSidebar}
     {chatOpen}
     onopenchat={openChatFromSidebar}
     onopensettings={() => (settingsOpen = true)}
@@ -658,7 +713,7 @@
     <FlashcardManager {workspace} topic={deckTopic} onclose={() => (deckTopicId = undefined)} onreveal={reveal} />
   {/if}
 
-  <div class="main">
+  <div class="main" class:beside-sidebar={sidebarPinned && zoomFollowsChat}>
     <input
       bind:this={fileInput}
       type="file"
@@ -685,7 +740,7 @@
 
     {#if workspace.activeTopic}
       <!-- One row: the tabs scroll sideways when there are many, the controls never shrink. -->
-      <div class="tabrow" class:chat-closed={!chatOpen}>
+      <div class="tabrow" class:chat-closed={!chatOpen} class:sidebar-pinned={sidebarPinned && !zoomFollowsChat}>
         <button
           type="button"
           class="icon-button outline-toggle"
@@ -809,6 +864,7 @@
               reserve={chatOpen || zoomFollowsChat ? 0 : chatReserve()}
               {chatOpen}
               followChat={zoomFollowsChat}
+              sidebarPinned={sidebarPinned && zoomFollowsChat}
               {tool}
               ontoolchange={setTool}
               onpick={(p) => onPick(id, p)}
@@ -894,13 +950,32 @@
     color: #82071e;
   }
 
-  /* The sidebar floats over this, so it only makes room for its collapsed strip. */
   .main {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-width: 0;
-    margin-left: var(--sidebar-strip);
+    transition: margin-left 0.2s ease;
+  }
+  /* Pinned with "Fit to chat": the sidebar takes its room like the chat, and the PDF fits beside it.
+     With "Fixed size" it lies over the PDF instead, and only the tab row makes way. */
+  .main.beside-sidebar {
+    margin-left: 15rem;
+  }
+
+  /* In the top left corner, over the sidebar, where the tab row leaves room for it. */
+  .sidebar-toggle {
+    position: absolute;
+    top: 0.25rem;
+    left: 0.625rem;
+    z-index: 31;
+  }
+  .sidebar-toggle svg {
+    width: 1.1rem;
+    height: 1.1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
   }
 
   /* The chrome around the PDF shares the sidebar's and the chat's background, shapes and hover shade. */
@@ -911,14 +986,27 @@
     padding: 0.25rem 0.5rem;
     border-bottom: 1px solid var(--border);
     background: var(--sidebar-bg);
-    transition: padding-right 0.2s ease;
+    /* Room on the left for the sidebar button in the corner. */
+    padding-left: 2.75rem;
+    transition:
+      padding-right 0.2s ease,
+      padding-left 0.2s ease;
+  }
+  /* The sidebar lies over the PDF but not over the tab row, which moves along beside it. */
+  .tabrow.sidebar-pinned {
+    padding-left: calc(15rem + 0.5rem);
+  }
+  /* Pinned beside the PDF, the sidebar holds the button, so the tab row needs no room for it. */
+  .beside-sidebar .tabrow {
+    padding-left: 0.5rem;
   }
   /* Room for the chat icon in the corner. With the chat open, the panel takes that corner. */
   .tabrow.chat-closed {
     padding-right: calc(0.5rem + 1.75rem + 0.25rem);
   }
   @media (prefers-reduced-motion: reduce) {
-    .tabrow {
+    .tabrow,
+    .main {
       transition: none;
     }
   }
@@ -1052,11 +1140,14 @@
     color: inherit;
   }
 
-  .outline-toggle {
+  .outline-toggle,
+  .sidebar-toggle {
     color: var(--muted);
   }
   .outline-toggle:hover,
-  .outline-toggle.pressed {
+  .outline-toggle.pressed,
+  .sidebar-toggle:hover,
+  .sidebar-toggle.pressed {
     color: inherit;
   }
   .outline-toggle.pressed {

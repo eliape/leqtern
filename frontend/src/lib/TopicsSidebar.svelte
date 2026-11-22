@@ -10,8 +10,12 @@
 
   type Props = {
     workspace: Workspace
-    /** Whether the sidebar is expanded. When closed, a narrow strip with the two buttons remains. */
+    /** Whether the sidebar is showing, either peeking (hovered) or pinned. Hidden, it is gone entirely. */
     open?: boolean
+    /** Pinned by its button: opaque and without a shadow, and it stays until unpinned. */
+    pinned?: boolean
+    /** Called as the pointer comes into and leaves the sidebar, so a peek can end when it leaves. */
+    onhover?: (inside: boolean) => void
     /** Called when a discussion is picked, to show it in the chat. */
     onopenchat?: () => void
     /** Whether the chat is showing. Only then is its discussion marked as the open one. */
@@ -28,7 +32,9 @@
 
   let {
     workspace,
-    open = $bindable(true),
+    open = false,
+    pinned = false,
+    onhover,
     onopenchat,
     chatOpen = false,
     onopensettings,
@@ -65,24 +71,7 @@
     duration: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150,
   })
 
-  // On collapse the contents stay until the sidebar has narrowed, so they slide away with it.
-  const SLIDE_MS = 200
-  let lingering = $state(false)
-  let wasOpen = open
-  $effect(() => {
-    if (open) {
-      wasOpen = true
-      lingering = false
-      return
-    }
-    if (!wasOpen) return
-    wasOpen = false
-    const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-    lingering = true
-    const timer = setTimeout(() => (lingering = false), reduced ? 0 : SLIDE_MS)
-    return () => clearTimeout(timer)
-  })
-  const expanded = $derived(open || lingering)
+  const expanded = $derived(open)
 
   // The topic or discussion whose actions menu (the three dots) is open.
   let menuId = $state<string>()
@@ -187,7 +176,6 @@
     }
     if (save) workspace.renameTopic(id, draft)
     // A new topic is ready once it is named: get out of the way of the PDF.
-    if (creating) open = false
   }
 
   /** Take a PDF out of its topic. Unlike closing its tab, the model no longer sees it. */
@@ -211,14 +199,11 @@
   function openChat(topicId: string, chatId: string) {
     workspace.selectTopic(topicId)
     workspace.selectChat(topicId, chatId)
-    // Picked: get out of the way and show it.
-    open = false
     onopenchat?.()
   }
 
   function newDiscussion(topicId: string) {
     workspace.newChat(topicId)
-    open = false
     onopenchat?.()
   }
 
@@ -227,8 +212,6 @@
   }
 
   async function newTopic() {
-    // The list (and so the name box) is hidden while collapsed.
-    open = true
     topicBeforeCreating = workspace.activeTopicId
     const topic = workspace.createTopic()
     creatingId = topic.id
@@ -242,29 +225,26 @@
   bind:this={sidebar}
   class="topics-sidebar"
   class:closed={!open}
+  class:pinned
   id="topics-sidebar"
   aria-label="Topics"
+  inert={!open}
   onscrollcapture={closeCard}
+  onpointerenter={() => onhover?.(true)}
+  onpointerleave={() => onhover?.(false)}
 >
+  <!-- The sidebar button itself stays in the corner above this, outside the sidebar, so it never moves. -->
   <div class="top">
-    {#if expanded}<h1 class="fade">Leqtern</h1>{/if}
-    <button
-      type="button"
-      class="toggle"
-      aria-label={open ? 'Hide topics' : 'Show topics'}
-      aria-expanded={open}
-      aria-controls="topics-list"
-      onclick={() => (open = !open)}>☰</button
-    >
+    <h1>Leqtern</h1>
   </div>
 
-  <button type="button" class="new" aria-label="New topic" title={expanded ? undefined : 'New topic'} onclick={newTopic}>
+  <button type="button" class="new" aria-label="New topic" onclick={newTopic}>
     <span class="plus" aria-hidden="true">＋</span>
-    {#if expanded}<span class="fade">New topic</span>{/if}
+    <span>New topic</span>
   </button>
 
   {#if expanded}
-    <div id="topics-list" class="list fade">
+    <div id="topics-list" class="list">
       <h2>Topics</h2>
 
       {#if shown.length === 0 && archived.length === 0}
@@ -592,16 +572,15 @@
     aria-label="Archive"
     aria-haspopup="dialog"
     aria-expanded={popup}
-    title={expanded ? undefined : 'Archive'}
     onclick={toggleArchive}
   >
     <span class="plus" aria-hidden="true">
       <svg viewBox="0 0 24 24"><path d={ARCHIVE_ICON} /></svg>
     </span>
-    {#if expanded}<span class="fade">Archive</span>{/if}
-    {#if expanded && archived.length}<span class="fade archive-count">{archived.length}</span>{/if}
+    <span>Archive</span>
+    {#if archived.length}<span class="archive-count">{archived.length}</span>{/if}
   </button>
-  <button type="button" class="new settings" aria-label="Settings" title={expanded ? undefined : 'Settings'} onclick={() => onopensettings?.()}>
+  <button type="button" class="new settings" aria-label="Settings" onclick={() => onopensettings?.()}>
     <span class="plus" aria-hidden="true">
       <svg viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="3" />
@@ -610,7 +589,7 @@
         />
       </svg>
     </span>
-    {#if expanded}<span class="fade">Settings</span>{/if}
+    <span>Settings</span>
   </button>
 </aside>
 
@@ -665,38 +644,44 @@
 
 <style>
   .topics-sidebar {
-    /* The room inside the collapsed strip (its width less padding and border): both icons are centred in a cell this wide. */
-    --icon-cell: calc(var(--sidebar-strip) - 0.75rem - 1px);
+    /* The plus and the icons below it sit in a cell this wide, under the sidebar button in the corner. */
+    --icon-cell: 2.25rem;
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    /* Floats over the page rather than pushing it: the page only keeps room for the collapsed strip. */
+    /* Peeking, it floats over the page. Pinned, the page makes room for it (see App). */
     position: absolute;
     inset: 0 auto 0 0;
     z-index: 30;
     width: 15rem;
     box-sizing: border-box;
-    padding: 0.5rem 0.375rem;
+    padding: 0 0.375rem 0.5rem;
     border-right: 1px solid var(--border);
-    /* Slightly see-through and blurred, so it reads as lying on top of the PDF. */
+    /* Peeking: slightly see-through and blurred, so it reads as lying on top of the PDF. */
     background: color-mix(in srgb, var(--sidebar-bg) 82%, transparent);
     backdrop-filter: blur(14px);
     box-shadow: var(--sidebar-shadow);
     overflow: hidden;
     white-space: nowrap;
-    /* Slides like the chat panel. */
+    /* Slides in from the left edge as it fades in. */
     transition:
-      width 0.2s ease,
+      transform 0.2s ease,
+      opacity 0.2s ease,
+      visibility 0.2s,
       background-color 0.2s ease,
-      backdrop-filter 0.2s ease,
       box-shadow 0.2s ease;
   }
-  /* Just wide enough for the two buttons. (Not named .sidebar: PDF.js's stylesheet styles that globally.) */
-  .topics-sidebar.closed {
-    width: var(--sidebar-strip);
+  /* Pinned: solid, flat, part of the layout like the chat. (Not named .sidebar: PDF.js's stylesheet styles that globally.) */
+  .topics-sidebar.pinned {
     background: var(--sidebar-bg);
-    backdrop-filter: blur(0);
-    box-shadow: 6px 0 28px transparent;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  .topics-sidebar.closed {
+    transform: translateX(-100%);
+    opacity: 0;
+    visibility: hidden;
+    box-shadow: none;
   }
   @media (prefers-reduced-motion: reduce) {
     .topics-sidebar,
@@ -715,22 +700,15 @@
     scrollbar-width: thin;
   }
 
-  /*
-   * The two buttons sit in the same place whether the sidebar is open or shut (the menu button at the
-   * right edge, the plus in a fixed cell at the left), and the text beside them fades out while the
-   * sidebar narrows. So when the text is finally taken away at the end, nothing moves.
-   */
-  .fade {
-    transition: opacity 0.15s ease;
-  }
-  .closed .fade {
-    opacity: 0;
-  }
-
+  /* As tall as the tab row, with room on the left for the sidebar button that sits over it. */
   .top {
     display: flex;
     flex-shrink: 0;
     align-items: center;
+    height: var(--bar-height);
+    margin-inline: -0.375rem;
+    padding-left: calc(0.375rem + var(--icon-cell));
+    border-bottom: 1px solid var(--border);
   }
 
   h1 {
@@ -738,12 +716,10 @@
     min-width: 0;
     overflow: hidden;
     margin: 0;
-    /* An indent, not a margin: a margin can't shrink, so it would shove the menu button out of the narrowing sidebar. */
-    text-indent: 0.5rem;
+    padding-left: 0.25rem;
     font-size: 1rem;
   }
 
-  .toggle,
   .new {
     border: none;
     background: none;
@@ -751,14 +727,6 @@
     font: inherit;
     cursor: pointer;
     border-radius: 0.375rem;
-  }
-  .toggle {
-    flex-shrink: 0;
-    width: var(--icon-cell);
-    height: 2.125rem;
-    margin-left: auto;
-    padding: 0;
-    font-size: 1.1rem;
   }
   .new {
     display: flex;
