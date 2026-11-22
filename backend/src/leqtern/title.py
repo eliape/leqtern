@@ -15,7 +15,10 @@ TITLE_PROMPT = """\
 A student studying "{topic}" starts a discussion with a tutor. {about}
 
 Write a title for the discussion: 2 to 6 words naming what it is about, in the language \
-of the question, sentence case, no quotes and no full stop."""
+of the question, sentence case, no quotes and no full stop. Every discussion here is about \
+"{topic}", so leave out the topic's name and words that only repeat it: in a topic called \
+"Special relativity", "Explanation of rapidity in special relativity" becomes "Explanation of \
+rapidity"."""
 
 
 class Title(BaseModel):
