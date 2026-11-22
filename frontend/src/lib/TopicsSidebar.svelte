@@ -90,16 +90,37 @@
   // The card beside the sidebar for the source under the pointer: its full title and kind.
   let sidebar: HTMLElement | undefined = $state()
   let hoverCard = $state<{ id: string; top: number; left: number }>()
-  function showCard(id: string, row: HTMLElement) {
-    const box = row.getBoundingClientRect()
-    hoverCard = { id, top: box.top + box.height / 2, left: (sidebar?.getBoundingClientRect().right ?? box.right) + 8 }
+  // It appears after a short rest on a source. Once showing, it slides to the next source at once,
+  // and only goes when the pointer has left the sources for a moment (the gap between rows doesn't count).
+  const CARD_DELAY_MS = 400
+  const CARD_GRACE_MS = 120
+  let showTimer: ReturnType<typeof setTimeout> | undefined
+  let hideTimer: ReturnType<typeof setTimeout> | undefined
+  function clearCardTimers() {
+    clearTimeout(showTimer)
+    clearTimeout(hideTimer)
   }
-  function hideCard(id: string) {
-    if (hoverCard?.id === id) hoverCard = undefined
+  function closeCard() {
+    clearCardTimers()
+    hoverCard = undefined
+  }
+  function showCard(id: string, row: HTMLElement) {
+    clearCardTimers()
+    const place = () => {
+      const box = row.getBoundingClientRect()
+      hoverCard = { id, top: box.top + box.height / 2, left: (sidebar?.getBoundingClientRect().right ?? box.right) + 8 }
+    }
+    if (hoverCard) place()
+    else showTimer = setTimeout(place, CARD_DELAY_MS)
+  }
+  function hideCard() {
+    clearTimeout(showTimer)
+    if (hoverCard) hideTimer = setTimeout(() => (hoverCard = undefined), CARD_GRACE_MS)
   }
   $effect(() => {
-    if (!expanded || menuId) hoverCard = undefined
+    if (!expanded || menuId) closeCard()
   })
+  $effect(() => clearCardTimers)
   function kindLabel(id: string): string {
     const state = workspace.indexing[id]
     if (state?.kind) return state.kind[0].toUpperCase() + state.kind.slice(1)
@@ -210,7 +231,7 @@
   class:closed={!open}
   id="topics-sidebar"
   aria-label="Topics"
-  onscrollcapture={() => (hoverCard = undefined)}
+  onscrollcapture={closeCard}
 >
   <div class="top">
     {#if expanded}<h1 class="fade">Leqtern</h1>{/if}
@@ -448,7 +469,7 @@
                       class="row"
                       role="presentation"
                       onpointerenter={(e) => showCard(id, e.currentTarget)}
-                      onpointerleave={() => hideCard(id)}
+                      onpointerleave={hideCard}
                     >
                       <button type="button" class="topic" onclick={() => workspace.openDoc(id)}>
                         <span class="name" use:marquee><span>{name}</span></span>
@@ -607,7 +628,8 @@
     box-shadow: 6px 0 28px transparent;
   }
   @media (prefers-reduced-motion: reduce) {
-    .topics-sidebar {
+    .topics-sidebar,
+    .source-card {
       transition: none;
     }
   }
@@ -1020,6 +1042,8 @@
     background: var(--surface);
     box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
     pointer-events: none;
+    /* Slides from one source to the next. */
+    transition: top 0.15s ease;
   }
   .source-title {
     font-size: 0.85rem;

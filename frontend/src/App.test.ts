@@ -520,14 +520,19 @@ describe('App', () => {
     const sources = within(screen.getByRole('list', { name: 'Sources' }))
     const row = (name: RegExp) => sources.getByRole('button', { name }).parentElement!
     await fireEvent.pointerEnter(row(/^a\.pdf/))
-    expect(screen.getByRole('tooltip')).toHaveTextContent('a.pdf')
-    expect(screen.getByRole('tooltip')).toHaveTextContent(/Not indexed yet|Could not be indexed/)
-    // Moving straight to another source swaps the card at once.
+    // It waits a moment before appearing.
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    const card = await screen.findByRole('tooltip', {}, { timeout: 1000 })
+    expect(card).toHaveTextContent('a.pdf')
+    expect(card).toHaveTextContent(/Not indexed yet|Could not be indexed/)
+    // Moving straight to another source keeps the same card and changes what it shows.
     await fireEvent.pointerLeave(row(/^a\.pdf/))
     await fireEvent.pointerEnter(row(/^b\.pdf/))
-    expect(screen.getByRole('tooltip')).toHaveTextContent('b.pdf')
+    expect(screen.getByRole('tooltip')).toBe(card)
+    expect(card).toHaveTextContent('b.pdf')
+    // Leaving the sources hides it shortly after.
     await fireEvent.pointerLeave(row(/^b\.pdf/))
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
   })
 
   it('opens the file picker from Upload source, and toggles the lists', async () => {
