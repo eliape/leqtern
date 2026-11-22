@@ -21,12 +21,20 @@
   const fadeMs = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 180
 
   let list = $state<HTMLElement>()
+  // The scrollbar stays hidden while the panel opens, so jumping to the current
+  // section doesn't flash an overlay scrollbar (macOS, Firefox).
+  let settled = $state(false)
 
   // Open at the section being read.
   $effect(() => {
     if (!entries?.length || !list) return
     const el = list
-    tick().then(() => el.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: 'center' }))
+    let timer: ReturnType<typeof setTimeout> | undefined
+    tick().then(() => {
+      el.querySelector('[aria-current="true"]')?.scrollIntoView?.({ block: 'center' })
+      timer = setTimeout(() => (settled = true), fadeMs + 100)
+    })
+    return () => clearTimeout(timer)
   })
 </script>
 
@@ -34,6 +42,7 @@
 <nav
   id="doc-outline"
   class="outline"
+  class:settled
   aria-label="Outline"
   transition:fade|global={{ duration: fadeMs }}
   onkeydown={(e) => {
@@ -80,6 +89,9 @@
     );
     color: var(--outline-text);
     font-size: 0.9rem;
+    scrollbar-width: none;
+  }
+  .outline.settled {
     scrollbar-width: thin;
   }
 
