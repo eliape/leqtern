@@ -17,6 +17,8 @@ function offline() {
 
 beforeEach(() => {
   vi.stubGlobal('fetch', offline())
+  // Most tests use the topics, so the sidebar starts pinned. The tests of peeking unpin it.
+  localStorage.setItem('leqtern.sidebarPinned', '1')
 })
 
 afterEach(() => {
@@ -25,10 +27,13 @@ afterEach(() => {
   localStorage.clear()
 })
 
-/** Adding a PDF folds the sidebar away; open it again to use the topics. */
+/** Pin the sidebar open, unless it already is. */
 async function showTopics() {
-  await fireEvent.click(screen.getByRole('button', { name: 'Show topics' }))
+  const pin = screen.queryByRole('button', { name: 'Show topics' })
+  if (pin) await fireEvent.click(pin)
 }
+
+const topicsSidebar = () => screen.getByRole('complementary', { name: 'Topics', hidden: true }) as HTMLElement & { inert: boolean }
 
 const pdf = (name: string, body = '%PDF-1.7') => new File([body], name, { type: 'application/pdf' })
 
@@ -224,7 +229,7 @@ describe('App', () => {
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
   })
 
-  it('opens several picked PDFs at once as tabs in one topic, on the first, and folds the sidebar away', async () => {
+  it('opens several picked PDFs at once as tabs in one topic, on the first', async () => {
     renderOffline()
     await fireEvent.change(screen.getByTestId('file-input'), {
       target: { files: [pdf('Lecture 4.pdf'), pdf('Course book.pdf', '%PDF-1.7 book'), pdf('Old exam.pdf', '%PDF-1.7 exam')] },
@@ -234,8 +239,6 @@ describe('App', () => {
       expect.arrayContaining(['Lecture 4.pdf', 'Course book.pdf', 'Old exam.pdf']),
     )
     expect(screen.getByRole('tab', { name: 'Lecture 4.pdf', selected: true })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
-    await showTopics()
     expect(screen.getAllByRole('button', { name: /^Actions for (?!.*\.pdf)/ })).toHaveLength(1)
   })
 
@@ -317,40 +320,51 @@ describe('App', () => {
     expect(screen.getByText('Open a PDF to start reading.')).toBeInTheDocument()
   })
 
-  it('collapses the sidebar to a strip that keeps the menu and New topic buttons', async () => {
+  it('peeks the sidebar out while its button or the sidebar is hovered, and pins it on a click', async () => {
+    localStorage.removeItem('leqtern.sidebarPinned')
     renderOffline()
-    const sidebar = screen.getByRole('complementary', { name: 'Topics' })
-    const toggle = within(sidebar).getByRole('button', { name: 'Hide topics' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    const toggle = screen.getByRole('button', { name: 'Show topics' })
+    expect(topicsSidebar().inert).toBe(true)
+    // Hovering the button peeks it out, floating and see-through.
+    await fireEvent.pointerEnter(toggle)
+    expect(topicsSidebar().inert).toBe(false)
+    expect(topicsSidebar()).not.toHaveClass('pinned')
+    // Over to the sidebar: it stays. Away from both: it goes shortly after.
+    await fireEvent.pointerLeave(toggle)
+    await fireEvent.pointerEnter(topicsSidebar())
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(topicsSidebar().inert).toBe(false)
+    await fireEvent.pointerLeave(topicsSidebar())
+    await waitFor(() => expect(topicsSidebar().inert).toBe(true))
+
+    // A click pins it, and that is remembered.
     await fireEvent.click(toggle)
-
-    // The contents stay while the sidebar slides shut, then go.
-    await waitFor(() => expect(within(sidebar).queryByRole('heading', { name: 'Topics' })).not.toBeInTheDocument())
-    expect(within(sidebar).queryByRole('heading', { name: 'Leqtern' })).not.toBeInTheDocument()
-    expect(within(sidebar).getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
-    expect(within(sidebar).getByRole('button', { name: 'New topic' })).toBeInTheDocument()
-
-    await fireEvent.click(within(sidebar).getByRole('button', { name: 'Show topics' }))
-    expect(within(sidebar).getByRole('heading', { name: 'Topics' })).toBeInTheDocument()
+    expect(toggle).toHaveAccessibleName('Hide topics')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(topicsSidebar()).toHaveClass('pinned')
+    expect(localStorage.getItem('leqtern.sidebarPinned')).toBe('1')
+    await fireEvent.pointerLeave(toggle)
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    expect(topicsSidebar().inert).toBe(false)
+    await fireEvent.click(toggle)
+    expect(localStorage.getItem('leqtern.sidebarPinned')).toBe('0')
   })
 
-  it('starts every load with the sidebar open and the chat closed, whatever an earlier visit left', () => {
-    localStorage.setItem('doc-digest.sidebarOpen', 'false')
+  it('starts with the sidebar pinned or not as it was left, and the chat closed', () => {
     localStorage.setItem('doc-digest.chatOpen', 'true')
     renderOffline()
     expect(screen.getByRole('button', { name: 'Hide topics' })).toHaveAttribute('aria-expanded', 'true')
     expect((screen.getByRole('complementary', { name: 'Chat' }) as HTMLElement & { inert: boolean }).inert).toBe(true)
   })
 
-  it('folds the sidebar away when a PDF is added, every time', async () => {
+  it('ends a peek when a PDF is added, but leaves a pinned sidebar', async () => {
     renderOffline()
-    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     await pick(pdf('a.pdf', 'a'))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toHaveAttribute('aria-expanded', 'false')
-
-    await showTopics()
+    expect(topicsSidebar().inert).toBe(false)
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide topics' }))
+    expect(topicsSidebar().inert).toBe(false)
     await pick(pdf('b.pdf', 'b'))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(true)
   })
 
   it('leaves the sidebar open when the file is not a PDF', async () => {
@@ -378,25 +392,22 @@ describe('App', () => {
     expect(document.title).toBe('Stats · Leqtern')
   })
 
-  it('folds the sidebar away once a new topic is named, but not when a topic is only renamed', async () => {
+  it('keeps the sidebar open once a new topic is named, and when a topic is renamed', async () => {
     renderOffline()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
     await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
-    // Still open while the name is being typed.
     const name = sidebar.getByLabelText('Topic name')
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     await fireEvent.input(name, { target: { value: 'Statistics' } })
     await fireEvent.submit(name)
-    expect(sidebar.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
 
-    await showTopics()
     await fireEvent.click(sidebar.getByRole('button', { name: 'Actions for Statistics' }))
     await fireEvent.click(sidebar.getByRole('menuitem', { name: 'Rename' }))
     const again = sidebar.getByLabelText('Topic name')
     await fireEvent.input(again, { target: { value: 'Stats' } })
     await fireEvent.submit(again)
     expect(sidebar.getByRole('button', { name: /^Stats/ })).toBeInTheDocument()
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(false)
   })
 
   it('puts rename and delete in a three-dot menu on each topic that closes on Escape or an outside click', async () => {
@@ -457,29 +468,26 @@ describe('App', () => {
     expect(sidebar.queryByLabelText('Topic name')).not.toBeInTheDocument()
     expect(sidebar.queryByRole('button', { name: /^New topic/  })).toBeInTheDocument()
     expect(sidebar.queryByText('New topic', { selector: '.name' })).not.toBeInTheDocument()
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'slides.pdf' })).toBeInTheDocument()
   })
 
-  it('folds the sidebar away when the content is pressed', async () => {
+  it('ends a peek when the content or the chat is pressed, but not the sidebar, and never a pinned one', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
     await screen.findByRole('tab', { name: 'slides.pdf' })
-    await showTopics()
-    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     await fireEvent.pointerDown(screen.getByTestId('pdf-viewer'))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
-  })
+    expect(topicsSidebar().inert).toBe(false)
 
-  it('folds the sidebar away when the chat is pressed, but not when the sidebar itself is', async () => {
-    renderOffline()
-    await pick(pdf('slides.pdf'))
-    await screen.findByRole('tab', { name: 'slides.pdf' })
-    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Hide topics' }))
+    await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Show topics' }))
     await fireEvent.pointerDown(screen.getByRole('heading', { name: 'Topics' }))
-    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(false)
     await fireEvent.pointerDown(screen.getByRole('complementary', { name: 'Chat' }))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    expect(topicsSidebar().inert).toBe(true)
+    await fireEvent.pointerEnter(screen.getByRole('button', { name: 'Show topics' }))
+    await fireEvent.pointerDown(screen.getByTestId('pdf-viewer'))
+    expect(topicsSidebar().inert).toBe(true)
   })
 
   it('keeps the sidebar open when a topic is clicked, so a discussion can be picked', async () => {
@@ -613,15 +621,6 @@ describe('App', () => {
     expect(tabs()).toEqual(['b.pdf', 'a.pdf'])
     expect(document.querySelector('.drop-line')).not.toBeInTheDocument()
     expect(document.querySelector('.app')).not.toHaveClass('tab-dragging')
-  })
-
-  it('expands the sidebar when New topic is pressed while it is collapsed', async () => {
-    renderOffline()
-    const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
-    await fireEvent.click(sidebar.getByRole('button', { name: 'Hide topics' }))
-    await fireEvent.click(sidebar.getByRole('button', { name: 'New topic' }))
-    expect(sidebar.getByLabelText('Topic name')).toBeInTheDocument()
-    expect(sidebar.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
   })
 
   it('has no Open PDF button, and shows the open tab\'s controls in the tab row', async () => {
@@ -1053,10 +1052,12 @@ describe('App', () => {
   it('opens the chat from New discussion under the open topic in the sidebar', async () => {
     renderOffline()
     await pick(pdf('slides.pdf'))
+    await screen.findByRole('tab', { name: 'slides.pdf' })
     await showTopics()
     const sidebar = within(screen.getByRole('complementary', { name: 'Topics' }))
     await fireEvent.click(sidebar.getByRole('button', { name: 'New discussion' }))
-    expect(screen.getByRole('button', { name: 'Show topics' })).toBeInTheDocument()
+    // The sidebar stays.
+    expect(screen.getByRole('button', { name: 'Hide topics' })).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Chat' })).toHaveClass('open')
     // New discussion is an action, never marked as the open discussion.
     await showTopics()

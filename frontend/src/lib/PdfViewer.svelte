@@ -37,6 +37,11 @@
      */
     followChat?: boolean
     /**
+     * Whether the pinned topics sidebar takes room on the left. Like the chat, the page shrinks
+     * to fit as it slides in and grows back as it goes, unless zoomed by hand meanwhile.
+     */
+    sidebarPinned?: boolean
+    /**
      * What a left click does: with `ask`, clicking a spot or selecting text calls `onpick`;
      * with `select`, clicks and selections are the browser's own.
      */
@@ -65,6 +70,7 @@
     reserve = 0,
     chatOpen = false,
     followChat = false,
+    sidebarPinned = false,
     tool = 'select',
     onpick,
     oncontextpick,
@@ -199,6 +205,54 @@
 
   $effect(() => () => {
     if (resize) cancelAnimationFrame(resize.frame)
+  })
+
+  // The pinned sidebar: the zoom before it came and the zoom it shrank to, and its slide under way.
+  let sideShrunk: { from: number; to: number } | undefined
+  let sideFrame: number | undefined
+  let sidebarWasPinned: boolean | undefined
+  $effect(() => {
+    const pinned = sidebarPinned
+    untrack(() => {
+      const was = sidebarWasPinned
+      sidebarWasPinned = pinned
+      if (was !== undefined && was !== pinned) resizeWithSidebar(pinned)
+    })
+  })
+
+  function resizeWithSidebar(opening: boolean) {
+    if (!viewer?.pagesCount) return
+    const room = 15 * parseFloat(getComputedStyle(document.documentElement).fontSize)
+    if (sideFrame !== undefined) cancelAnimationFrame(sideFrame)
+    sideFrame = undefined
+    const startWidth = container.clientWidth
+    const endWidth = opening ? startWidth - room : startWidth + room
+    let target: number
+    if (opening) {
+      const fit = fitScale(viewer, endWidth)
+      sideShrunk = viewer.currentScale > fit + 0.005 ? { from: viewer.currentScale, to: fit } : undefined
+      if (!sideShrunk) return
+      target = fit
+    } else {
+      const untouched = sideShrunk && Math.abs(viewer.currentScale - sideShrunk.to) < 0.005
+      const from = sideShrunk?.from
+      sideShrunk = undefined
+      if (!untouched || from === undefined) return
+      target = from
+    }
+    const startScale = viewer.currentScale
+    const started = performance.now()
+    const step = () => {
+      const p = progress(startWidth, endWidth, container.clientWidth)
+      const done = p >= 1 || performance.now() - started > 600
+      zoomTo(done ? target : startScale + (target - startScale) * p)
+      sideFrame = done ? undefined : requestAnimationFrame(step)
+    }
+    sideFrame = requestAnimationFrame(step)
+  }
+
+  $effect(() => () => {
+    if (sideFrame !== undefined) cancelAnimationFrame(sideFrame)
   })
 
   /** Zoom to `value` around the reading line, drawing the pages properly once it settles. */
