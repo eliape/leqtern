@@ -195,6 +195,29 @@ describe('Workspace', () => {
     expect(ws.activeTopic?.name).toBe('Linear algebra')
   })
 
+  it('renames sources and discussions, and a hand-given name outlasts Haiku', async () => {
+    const ws = new Workspace()
+    let titled!: (title: string) => void
+    ws.titleApi = () => new Promise((resolve) => (titled = resolve))
+    const doc = ws.addDoc('notes.pdf', bytes(1))
+    ws.renameDoc(doc.id, ' Week 3 notes ')
+    expect(ws.docs[doc.id].name).toBe('Week 3 notes')
+    ws.renameDoc(doc.id, '  ')
+    expect(ws.docs[doc.id].name).toBe('Week 3 notes')
+    expect(ws.docs[doc.id].renamed).toBe(true)
+
+    const topic = ws.activeTopic!
+    topic.draft = 'What is a basis?'
+    await ws.ask(topic.id, undefined, async function* () {
+      yield { type: 'text', text: 'A set of vectors…' }
+    })
+    const chat = chatOf(topic)
+    ws.renameChat(topic.id, chat.id, 'Bases')
+    titled('Haiku title')
+    await new Promise((resolve) => setTimeout(resolve))
+    expect(chatTitle(chat)).toBe('Bases')
+  })
+
   it('deletes a topic with its PDFs and selects a neighbour', () => {
     const ws = new Workspace()
     const first = ws.createTopic('First')

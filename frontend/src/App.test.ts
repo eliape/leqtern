@@ -535,6 +535,21 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
   })
 
+  it('renames a source from its menu, tab included', async () => {
+    renderOffline()
+    await pick(pdf('a.pdf', 'a'))
+    await screen.findByRole('tab', { name: 'a.pdf' })
+    await showTopics()
+    await fireEvent.click(screen.getByRole('button', { name: 'Sources' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Actions for a.pdf' }))
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+    const box = screen.getByRole('textbox', { name: 'Source name' })
+    await fireEvent.input(box, { target: { value: 'Lecture notes' } })
+    await fireEvent.submit(box.closest('form')!)
+    expect(screen.getByRole('tab', { name: 'Lecture notes' })).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Sources' })).getByRole('button', { name: /^Lecture notes/ })).toBeInTheDocument()
+  })
+
   it('opens the file picker from Upload source, and toggles the lists', async () => {
     renderOffline()
     await pick(pdf('a.pdf', 'a'))

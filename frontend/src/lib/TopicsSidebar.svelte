@@ -144,11 +144,16 @@
   }
 
   let renamingId = $state<string>()
+  // What is being renamed: a topic, or one of the open topic's discussions or sources.
+  let renamingKind: 'topic' | 'chat' | 'doc' = 'topic'
+  let renamingTopic: string | undefined
   let draft = $state('')
   let renameInput = $state<HTMLInputElement>()
 
-  async function startRename(id: string, name: string) {
+  async function startRename(id: string, name: string, kind: 'topic' | 'chat' | 'doc' = 'topic', topicId?: string) {
     renamingId = id
+    renamingKind = kind
+    renamingTopic = topicId
     draft = name
     await tick()
     renameInput?.select()
@@ -166,6 +171,14 @@
     const creating = id !== undefined && id === creatingId
     creatingId = undefined
     if (!id) return
+    if (renamingKind === 'chat') {
+      if (save && renamingTopic) workspace.renameChat(renamingTopic, id, draft)
+      return
+    }
+    if (renamingKind === 'doc') {
+      if (save) workspace.renameDoc(id, draft)
+      return
+    }
     if (creating && !save) {
       // Cancelling a new topic takes the placeholder away again and leaves the sidebar as it was.
       workspace.deleteTopic(id)
@@ -360,7 +373,7 @@
               {/if}
             {/if}
           </li>
-          {#if topic.id === workspace.activeTopicId && renamingId !== topic.id}
+          {#if topic.id === workspace.activeTopicId && !(renamingId === topic.id && renamingKind === 'topic')}
             {@const listed = discussions(topic)}
             {@const discussionsOpen = topic.discussionsOpen !== false}
             {@const sourcesOpen = !!topic.sourcesOpen}
@@ -393,6 +406,23 @@
                   {@const title = chatTitle(chat)}
                   {@const current = chatOpen && chat.id === chatOf(topic).id}
                   <li class="discussion">
+                    {#if renamingId === chat.id}
+                      <form
+                        class="rename"
+                        onsubmit={(e) => {
+                          e.preventDefault()
+                          finishRename(true)
+                        }}
+                      >
+                        <input
+                          bind:this={renameInput}
+                          bind:value={draft}
+                          aria-label="Discussion name"
+                          onblur={() => finishRename(true)}
+                          onkeydown={(e) => e.key === 'Escape' && finishRename(false)}
+                        />
+                      </form>
+                    {:else}
                     <div class="row" class:active={current}>
                       <button
                         type="button"
@@ -420,6 +450,17 @@
                           <button
                             type="button"
                             role="menuitem"
+                            onclick={() => {
+                              menuId = undefined
+                              startRename(chat.id, title, 'chat', topic.id)
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
                             class="danger"
                             onclick={() => {
                               menuId = undefined
@@ -432,6 +473,7 @@
                         </div>
                       {/if}
                     </div>
+                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -465,6 +507,23 @@
                 {#each topic.docIds as id (id)}
                   {@const name = workspace.docs[id]?.name ?? ''}
                   <li class="discussion">
+                    {#if renamingId === id}
+                      <form
+                        class="rename"
+                        onsubmit={(e) => {
+                          e.preventDefault()
+                          finishRename(true)
+                        }}
+                      >
+                        <input
+                          bind:this={renameInput}
+                          bind:value={draft}
+                          aria-label="Source name"
+                          onblur={() => finishRename(true)}
+                          onkeydown={(e) => e.key === 'Escape' && finishRename(false)}
+                        />
+                      </form>
+                    {:else}
                     <div
                       class="row"
                       role="presentation"
@@ -491,6 +550,17 @@
                           <button
                             type="button"
                             role="menuitem"
+                            onclick={() => {
+                              menuId = undefined
+                              startRename(id, name, 'doc')
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z" /></svg>
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
                             class="danger"
                             onclick={() => {
                               menuId = undefined
@@ -503,6 +573,7 @@
                         </div>
                       {/if}
                     </div>
+                    {/if}
                   </li>
                 {/each}
               </ul>
@@ -546,7 +617,7 @@
 {#if hoverCard && workspace.docs[hoverCard.id]}
   {@const doc = workspace.docs[hoverCard.id]}
   <div class="source-card" role="tooltip" style:top="{hoverCard.top}px" style:left="{hoverCard.left}px">
-    <div class="source-title">{workspace.indexing[hoverCard.id]?.title || doc.name}</div>
+    <div class="source-title">{(!doc.renamed && workspace.indexing[hoverCard.id]?.title) || doc.name}</div>
     <div class="source-kind">{kindLabel(hoverCard.id)}</div>
   </div>
 {/if}
@@ -767,6 +838,10 @@
   li form {
     flex: 1;
     padding: 0.25rem;
+  }
+  /* A discussion or source being renamed: the box sits where its row was. */
+  li form.rename {
+    padding: 1px 0;
   }
   li input {
     width: 100%;
