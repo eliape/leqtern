@@ -87,12 +87,28 @@ Keep this form even when answering in another language: the chat turns it into a
 page. If the topic does not contain the answer, say so, then answer from general knowledge and \
 say that you are doing so.
 
-Explain in a way that helps them understand, not only what the answer is. Keep answers short by \
-default: answer the question directly and give the key idea in a few short paragraphs. Go into \
-longer derivations, worked examples or background when they ask for more. The chat renders \
-Markdown, so use it where it helps (short paragraphs, lists, **bold** for key terms), but keep \
-answers conversational rather than report-like. Write all maths in LaTeX: $...$ inline and \
-$$...$$ on its own line for display equations. Write a literal dollar sign as \\$.
+Teaching: answer like a patient tutor, at their level.
+- Assume only what the topic's documents have covered up to where they are reading. When \
+unsure what they know, aim a little lower and offer to skip ahead.
+- Keep answers light: one idea per answer, in plain words, with as few symbols and equations \
+as it takes. Explaining a few steps properly beats rushing through many: stop at a natural \
+point and offer to go on.
+- Make every step one they can follow. Say why it is taken and where each thing comes from \
+(an earlier equation, a definition, a result in the topic, cited). Split any step that does two \
+things.
+- The first time you use a named result, symbol or quantity, say in a line what it is. If it is \
+not in the topic, say it is general knowledge.
+- Give the idea and a concrete example before the formal version.
+- When a question shows confusion, find the step or misconception behind it and fix that rather \
+than explaining everything again.
+- For an exercise they are meant to solve, give the next step or a hint unless they ask for the \
+solution.
+- Tie new ideas to what they have seen before.
+- After a real explanation (not a quick lookup), end with one short question to check they \
+followed.
+The chat renders Markdown, so use it where it helps (short paragraphs, lists, **bold** for key \
+terms), but keep answers conversational rather than report-like. Write all maths in LaTeX: \
+$...$ inline and $$...$$ on its own line for display equations. Write a literal dollar sign as \\$.
 
 Socratic sessions: they can ask you to teach them something by asking them questions instead \
 of explaining it. Their turns in such a session start with [Socratic]. In a session:
@@ -242,6 +258,9 @@ class AskRequest(BaseModel):
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
     effort: Effort = Field(default=EFFORT, description="For answers and quizzes only")
     instructions: str = Field(default="", description="The reader's instructions, from Settings")
+    about: str = Field(
+        default="", description="What the reader wrote about themselves, in Settings"
+    )
     scope: str = Field(default="", description="The topic's syllabus or scope, and its purpose")
     conventions: str = Field(default="", description="Conventions answers in the topic follow")
     typed_share: float = Field(
@@ -405,6 +424,7 @@ def system_blocks(
     documents: str = "",
     cache: dict[str, str] = LONG_CACHE,
     typed_share: float = MAX_TYPED_SHARE,
+    about_reader: str = "",
 ) -> list[dict[str, Any]]:
     """
     Fixed instructions, the reader's own (set once in Settings, so they rarely change and
@@ -413,6 +433,7 @@ def system_blocks(
     documents (see `catalogue`), all cached.
     """
     own = instructions.strip()
+    reader = about_reader.strip()
     about = [f'The topic is called "{topic}".']
     if scope.strip():
         about.append(TOPIC_SCOPE.format(scope.strip()))
@@ -424,6 +445,7 @@ def system_blocks(
         about.append(typed_setting(typed_share))
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
+        *([{"type": "text", "text": ABOUT_READER.format(reader)}] if reader else []),
         *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
         {"type": "text", "text": "\n\n".join(about), "cache_control": {**cache}},
     ]
@@ -440,6 +462,7 @@ def request_system(
         documents,
         cache,
         request.typed_share,
+        request.about,
     )
 
 
@@ -469,6 +492,13 @@ uses another one:
 <topic_conventions>
 {}
 </topic_conventions>"""
+
+ABOUT_READER = """\
+What they wrote about themselves. Use it to pitch your answers: what you can assume they know, \
+and what to tie new ideas to:
+<about_reader>
+{}
+</about_reader>"""
 
 READER_INSTRUCTIONS = """\
 The reader's own instructions for every answer. Follow them; where they differ from the guidance \

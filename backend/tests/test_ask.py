@@ -536,6 +536,16 @@ def test_the_readers_instructions_come_between_the_fixed_prompt_and_the_topic() 
     assert topic["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
 
+def test_what_the_reader_wrote_about_themselves_comes_before_their_instructions() -> None:
+    assert len(system_blocks("T", about_reader=" ")) == 2
+    _, about, own, _ = system_blocks(
+        "T", "Answer in Swedish.", about_reader=" Second-year physics. "
+    )
+    assert "<about_reader>\nSecond-year physics.\n</about_reader>" in about["text"]
+    assert "<reader_instructions>" in own["text"]
+    assert "cache_control" not in about
+
+
 def test_a_topics_scope_and_conventions_go_with_its_name_in_the_cached_prompt() -> None:
     _, topic = system_blocks(
         "Mechanics", "", " Chapters 1-6, exam on 12 Dec ", "Clockwise torque is positive."

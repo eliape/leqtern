@@ -225,6 +225,8 @@ export type SavedWorkspace = {
   topics: SavedTopic[]
   /** The reader's own instructions for every answer, set in Settings. */
   instructions?: string
+  /** What the reader wrote about themselves in Settings: background, education, what they have studied. */
+  about?: string
 }
 
 let nextId = 0
@@ -286,6 +288,8 @@ export class Workspace {
   answerEffort = $state<string>()
   /** The reader's own instructions, sent with every question (set in Settings). */
   instructions = $state('')
+  /** What the reader wrote about themselves, sent with every question (set in Settings). */
+  about = $state('')
   /** Whether sources go by the title their index found (a setting); otherwise by their file name. */
   indexTitles = $state(savedIndexTitles())
   /** Indexing progress per PDF (by tab id). */
@@ -946,10 +950,12 @@ export class Workspace {
       }
       const serverId = (id: string) => this.indexing[id]?.serverId
       const instructions = this.instructions.trim()
+      const about = this.about.trim()
       const request = {
         ...askRequest(topic, serverId, this.answerModel, chat, (id) => this.docs[id]?.name),
         ...(this.answerEffort && { effort: this.answerEffort }),
         ...(instructions && { instructions }),
+        ...(about && { about }),
         ...(quizTyped.share !== DEFAULT_TYPED_SHARE && { typed_share: quizTyped.share }),
       }
       await respond(answer, request, controller.signal)
@@ -1154,6 +1160,7 @@ export class Workspace {
       version: 1,
       activeTopicId: this.activeTopicId,
       ...(this.instructions.trim() && { instructions: this.instructions }),
+      ...(this.about.trim() && { about: this.about }),
       topics: this.topics.map((topic) => {
         const docs = topic.docIds.flatMap((id): SavedDoc[] => {
           const serverId = this.indexing[id]?.serverId
@@ -1225,6 +1232,7 @@ export class Workspace {
     this.topics = [...restored, ...this.topics]
     // Unless they were already changed while it loaded.
     if (!this.instructions && typeof saved.instructions === 'string') this.instructions = saved.instructions
+    if (!this.about && typeof saved.about === 'string') this.about = saved.about
     // Discussions saved before they had titles get one now, once.
     for (const topic of this.topics.slice(0, restored.length)) {
       for (const chat of topic.chats) if (!chat.title && chat.messages.length) void this.nameChat(topic, chat)

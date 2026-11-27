@@ -609,6 +609,26 @@ describe('Workspace.ask', () => {
     expect(back.instructions).toBe(' Answer in Swedish. ')
   })
 
+  it('sends what the reader wrote about themselves with every question, and saves it', async () => {
+    const ws = new Workspace()
+    ws.addDoc('notes.pdf', bytes(1))
+    const topic = ws.activeTopic!
+    const sent: (string | undefined)[] = []
+    const stream = async function* (request: AskRequest) {
+      sent.push(request.about)
+    }
+    topic.draft = 'one'
+    await ws.ask(topic.id, undefined, stream)
+    expect(ws.snapshot().about).toBeUndefined()
+    ws.about = ' Second-year physics. '
+    topic.draft = 'two'
+    await ws.ask(topic.id, undefined, stream)
+    expect(sent).toEqual([undefined, 'Second-year physics.'])
+    const back = new Workspace()
+    back.restore(JSON.parse(JSON.stringify(ws.snapshot())))
+    expect(back.about).toBe(' Second-year physics. ')
+  })
+
   it('starts a Socratic session about a spot attached for it, with what to focus on optional', async () => {
     const ws = new Workspace()
     const doc = ws.addDoc('notes.pdf', bytes(1))

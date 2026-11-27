@@ -131,6 +131,11 @@
           </div>
         {:else if category === 'chat'}
           <label class="field">
+            <span class="label">About you</span>
+            <span class="hint">Helps the model pitch answers at your level, like your education, your field and courses you have already done.</span>
+            <textarea rows="4" bind:value={workspace.about} placeholder="Nothing yet"></textarea>
+          </label>
+          <label class="field">
             <span class="label">Instructions for every answer</span>
             <span class="hint">Added to what the model is told in every topic, like “Answer in Swedish” or “I'm preparing for an exam”.</span>
             <textarea rows="6" bind:value={workspace.instructions} placeholder="Nothing yet"></textarea>
