@@ -4,7 +4,10 @@
   import { clampWidth, DEFAULT_WIDTH, MIN_WIDTH, readWidth, WIDTH_KEY } from './chatWidth'
   import { contextLabel, type PageContext, type Pick } from './context'
   import Dropdown from './Dropdown.svelte'
-  import { type CitableDocs, renderMarkdown, selectedMarkdown } from './markdown'
+  import { type CitableDocs, type Cite, renderMarkdown, selectedMarkdown } from './markdown'
+  import { fetchIndexSections, type IndexSection } from './api'
+  import { CardHover } from './cardHover.svelte'
+  import CitationCard from './CitationCard.svelte'
   import { FLASHCARD_ICON } from './flashcards'
   import { EFFORTS, MODELS, savedEffort, saveEffort, savedModel, saveModel } from './models'
   import { MODES } from './modes'
@@ -172,6 +175,7 @@
   let last = { top: 0, height: 0 }
 
   function onLogScroll() {
+    citeHover.close()
     if (!log) return
     placeReply()
     const { scrollTop: top, scrollHeight: height, clientHeight } = log
@@ -262,13 +266,63 @@
   }
 
   /** Show the page a citation in an answer points at, in the topic's PDF of that name. */
+  function openCite(cite: Cite) {
+    const docId = topic?.docIds.find((id) => workspace.docs[id]?.name === cite.doc)
+    citeHover.close()
+    if (docId && cite.page) onreveal?.({ docId, page: cite.page })
+  }
+
   function onCitationClick(event: MouseEvent) {
     const citation = (event.target as Element).closest<HTMLElement>('a.citation')
     if (!citation || !topic) return
     event.preventDefault()
-    const docId = topic.docIds.find((id) => workspace.docs[id]?.name === citation.dataset.doc)
-    const page = Number(citation.dataset.page)
-    if (docId && page) onreveal?.({ docId, page })
+    openCite({ doc: citation.dataset.doc!, page: Number(citation.dataset.page) })
+  }
+
+  /** A book icon's card: the places it cites, with each PDF's section headings fetched once. */
+  const citeHover = new CardHover(300)
+  let hoveredCites = $state<Cite[]>([])
+  let citeSections = $state<Record<string, IndexSection[]>>({})
+  const fetchingSections = new Set<string>()
+
+  function citeIcon(event: Event): HTMLElement | null {
+    return (event.target as Element | null)?.closest?.<HTMLElement>('a.cite-icon') ?? null
+  }
+
+  function showCites(icon: HTMLElement) {
+    let cites: Cite[]
+    try {
+      cites = JSON.parse(icon.dataset.cites ?? '[]')
+    } catch {
+      return
+    }
+    for (const cite of cites) {
+      const id = topic?.docIds.find((d) => workspace.docs[d]?.name === cite.doc)
+      const serverId = id && workspace.indexing[id]?.serverId
+      if (!id || !serverId || fetchingSections.has(id)) continue
+      fetchingSections.add(id)
+      fetchIndexSections(serverId)
+        .then((sections) => (citeSections[id] = sections))
+        .catch(() => fetchingSections.delete(id))
+    }
+    citeHover.show('cite', () => {
+      hoveredCites = cites
+      const rect = icon.getBoundingClientRect()
+      // Kept inside the window: the card is 13rem wide and centred on the icon.
+      const half = 6.5 * parseFloat(getComputedStyle(document.documentElement).fontSize) + 8
+      const x = Math.min(Math.max(rect.left + rect.width / 2, half), window.innerWidth - half)
+      const below = rect.top < 120
+      return { x, y: below ? rect.bottom + 6 : rect.top - 6, below }
+    })
+  }
+
+  function onCiteOver(event: Event) {
+    const icon = citeIcon(event)
+    if (icon) showCites(icon)
+  }
+
+  function onCiteOut(event: Event) {
+    if (citeIcon(event)) citeHover.leave()
   }
 
   /** Put the cursor in the question box. */
@@ -374,7 +428,7 @@
     {#if topic && chat}
       <!-- Citations are links inside the answers' HTML, so their clicks are handled here. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick} onscroll={onLogScroll} onwheel={onLogWheel}>
+      <div class="messages" role="log" aria-label={`Chat in ${topic.name}`} bind:this={log} onclick={onCitationClick} onpointerover={onCiteOver} onpointerout={onCiteOut} onfocusin={onCiteOver} onfocusout={onCiteOut} onscroll={onLogScroll} onwheel={onLogWheel}>
         {#each chat.messages as message, index (message.id)}
           <!-- Only the model's side of a Socratic session is marked; the reader's messages look as always. -->
           <div
@@ -640,6 +694,10 @@
   </div>
 </aside>
 
+{#if topic}
+  <CitationCard {workspace} hover={citeHover} cites={hoveredCites} docIds={topic.docIds} sections={citeSections} onopen={openCite} />
+{/if}
+
 <style>
   /* In the layout (not floating), so the PDF narrows and nothing is covered. */
   .chat-panel {
@@ -858,6 +916,40 @@
   }
   .markdown :global(.citation:hover) {
     text-decoration-style: solid;
+  }
+  /* A citation in parentheses is a small book icon after the claim; its card names the source. */
+  .markdown :global(.cite-icon) {
+    position: relative;
+    display: inline-block;
+    margin-left: 0.1em;
+    padding: 0 0.1em;
+    border-radius: 0.25em;
+    color: var(--muted);
+    text-decoration: none;
+    line-height: 1;
+    vertical-align: -0.1em;
+  }
+  .markdown :global(.cite-icon:hover),
+  .markdown :global(.cite-icon:focus-visible) {
+    color: var(--accent);
+    background: var(--hover);
+  }
+  .markdown :global(.cite-book) {
+    width: 0.95em;
+    height: 0.95em;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linejoin: round;
+  }
+  /* The citation's text, hidden but kept for copying. */
+  .markdown :global(.cite-copy) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   /* Wide equations scroll sideways instead of overflowing the panel. */
   .markdown :global(.math-display) {

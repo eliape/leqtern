@@ -431,10 +431,10 @@ describe('ChatPanel', () => {
     const notes = topic.docIds[0]
     chatOf(topic).messages.push({ id: 'q', role: 'user', text: 'Where?', context })
     chatOf(topic).messages.push({ id: 'a', role: 'assistant', text: 'It is defined in (notes.pdf, p. 7), see also (p. 8).', status: 'done' })
-    await fireEvent.click(await panel.findByRole('link', { name: /^notes\.pdf,\sp\.\s7$/ }))
+    await fireEvent.click(await panel.findByRole('link', { name: 'notes.pdf, p. 7' }))
     expect(onreveal).toHaveBeenLastCalledWith({ docId: notes, page: 7 })
     // A page alone points into the PDF the question was asked in.
-    await fireEvent.click(panel.getByRole('link', { name: /^p\.\s8$/ }))
+    await fireEvent.click(panel.getByRole('link', { name: 'notes.pdf, p. 8' }))
     expect(onreveal).toHaveBeenLastCalledWith({ docId: notes, page: 8 })
     expect(workspace.docs[notes]).toBeDefined()
   })

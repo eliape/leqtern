@@ -110,13 +110,13 @@ export function selectedMarkdown(range: Range): string {
   for (const block of root.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, pre, blockquote, tr, .math-display')) {
     block.append('\n')
   }
-  return (root.textContent ?? '').replace(/[^\S\n]*\n\s*/g, '\n').trim()
+  return (root.textContent ?? '').replace(/\u2060/g, '').replace(/[^\S\n]*\n\s*/g, '\n').trim()
 }
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // "p. 41", "pp. 41–43", also spelled out or in Swedish ("page 41", "s. 41", "sid. 41").
-const PAGES = String.raw`(?:pp?\.|pages?|ss?\.|sid\.|sidorna|sidan|sida)\s*(\d+)(?:\s*[–—-]\s*\d+)?`
+const PAGES = String.raw`(?:pp?\.|pages?|ss?\.|sid\.|sidorna|sidan|sida)\s*(\d+)(?:\s*[–—-]\s*(\d+))?`
 
 /**
  * Wrap page citations in links carrying the PDF's name and the first page, so the chat can show
@@ -157,10 +157,11 @@ export function linkCitations(root: HTMLElement, docs: CitableDocs) {
     const pieces: (string | HTMLElement)[] = []
     let at = 0
     for (const match of matches) {
-      const [whole, name, namedPage, alonePage] = match
+      const [whole, name, namedPage, namedEnd, alonePage, aloneEnd] = match
       const key = name?.toLowerCase()
       const doc = key ? (byName.get(key) ?? byAlias.get(key)!) : docs.current!
       const page = namedPage ?? alonePage
+      const end = namedEnd ?? aloneEnd
       // An alias means nothing to the reader, so the link shows the PDF's name instead.
       const shown = key && byAlias.has(key) && !byName.has(key) ? doc + whole.slice(name.length) : whole
       pieces.push(text.slice(at, match.index))
@@ -170,6 +171,7 @@ export function linkCitations(root: HTMLElement, docs: CitableDocs) {
       link.className = 'citation'
       link.dataset.doc = doc
       link.dataset.page = page
+      if (end && Number(end) > Number(page)) link.dataset.end = end
       link.title = `Show ${doc}, p. ${page}`
       // Non-breaking spaces keep "p. 41" with its PDF's name when the line wraps.
       const lead = key ? shown.length - (whole.length - name.length) : 0
@@ -180,4 +182,75 @@ export function linkCitations(root: HTMLElement, docs: CitableDocs) {
     pieces.push(text.slice(at))
     node.replaceWith(...pieces)
   }
+  iconCitations(root)
+}
+
+/** One cited place: a PDF by name, its first page and, for a range, its last. */
+export type Cite = { doc: string; page: number; end?: number }
+
+const BOOK_ICON =
+  '<svg class="cite-book" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5C6.6 2.6 4.6 2.3 2.5 2.5v9.5c2.1-.2 4.1.1 5.5 1 1.4-.9 3.4-1.2 5.5-1V2.5c-2.1-.2-4.1.1-5.5 1zM8 3.5v9.5"/></svg>'
+
+/**
+ * Citations in parentheses, like "is linear (book.pdf, p. 41)." or "(a.pdf, p. 3; b.pdf, p. 9)",
+ * become one small book icon right after the claim, in place of the parentheses. The icon carries
+ * every place it cites; the original text stays inside it, hidden, so copying the answer keeps it.
+ * A citation written into the sentence itself ("see book.pdf, p. 41") stays a text link.
+ */
+function iconCitations(root: HTMLElement) {
+  const done = new Set<Element>()
+  for (const first of root.querySelectorAll<HTMLAnchorElement>('a.citation')) {
+    if (done.has(first)) continue
+    // The citations that follow it with only commas, semicolons or spaces between.
+    const group = [first]
+    for (let next = first.nextSibling; next; ) {
+      if (next instanceof Text && /^[\s,;]*$/.test(next.data) && next.nextSibling instanceof HTMLAnchorElement) {
+        next = next.nextSibling
+      } else if (next instanceof HTMLAnchorElement && next.classList.contains('citation')) {
+        group.push(next)
+        next = next.nextSibling
+      } else break
+    }
+    group.forEach((link) => done.add(link))
+    const before = first.previousSibling
+    const after = group[group.length - 1].nextSibling
+    const open = before instanceof Text ? /\s*\(\s*$/.exec(before.data) : null
+    const close = after instanceof Text ? /^\s*\)/.exec(after.data) : null
+    if (!open || !close || !(before instanceof Text) || !(after instanceof Text)) continue
+
+    const range = document.createRange()
+    range.setStart(before, open.index)
+    range.setEnd(after, close[0].length)
+    const original = range.toString().replace(/\u00a0/g, ' ')
+    const cites: Cite[] = group.map((link) => ({
+      doc: link.dataset.doc!,
+      page: Number(link.dataset.page),
+      ...(link.dataset.end ? { end: Number(link.dataset.end) } : {}),
+    }))
+    const icon = document.createElement('a')
+    icon.href = '#'
+    icon.className = 'citation cite-icon'
+    icon.dataset.doc = cites[0].doc
+    icon.dataset.page = String(cites[0].page)
+    icon.dataset.cites = JSON.stringify(cites)
+    icon.setAttribute('aria-label', cites.map((c) => citeLabel(c)).join('; '))
+    // Hidden text for copying; word joiners keep the icon on one line with the word before it and the full stop after.
+    const copy = document.createElement('span')
+    copy.className = 'cite-copy'
+    copy.textContent = original
+    icon.append(copy, '\u2060')
+    icon.insertAdjacentHTML('beforeend', BOOK_ICON)
+    icon.append('\u2060')
+    range.deleteContents()
+    range.insertNode(icon)
+  }
+}
+
+/** "book.pdf, p. 41" or "book.pdf, pp. 41–43". */
+export function citeLabel(cite: Cite, name = cite.doc): string {
+  return `${name}, ${pagesLabel(cite)}`
+}
+
+export function pagesLabel(cite: Cite): string {
+  return cite.end ? `pp. ${cite.page}–${cite.end}` : `p. ${cite.page}`
 }

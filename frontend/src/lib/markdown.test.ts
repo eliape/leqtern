@@ -62,7 +62,7 @@ describe('renderMarkdown', () => {
 
   const citations = (div: HTMLElement) =>
     [...div.querySelectorAll<HTMLAnchorElement>('a.citation')].map((c) => [
-      c.textContent?.replace(/\u00a0/g, ' '),
+      (c.getAttribute('aria-label') ?? c.textContent)?.replace(/\u00a0/g, ' '),
       c.dataset.doc,
       c.dataset.page,
     ])
@@ -76,7 +76,8 @@ describe('renderMarkdown', () => {
       ['book.pdf, p. 41', 'book.pdf', '41'],
       ['notes, pp. 3–5', 'notes.pdf', '3'],
     ])
-    expect(div.textContent?.replace(/\u00a0/g, ' ')).toContain('See (book.pdf, p. 41) and notes, pp. 3–5; not other.pdf')
+    // The text is kept (hidden inside the icon), so copying the answer keeps it.
+    expect(div.textContent?.replace(/\u00a0/g, ' ').replace(/\u2060/g, '')).toContain('See (book.pdf, p. 41) and notes, pp. 3–5; not other.pdf')
   })
 
   it('reads the other ways the model writes citations', () => {
@@ -86,17 +87,38 @@ describe('renderMarkdown', () => {
       docs,
     )
     expect(citations(div)).toEqual([
-      ['p. 12', 'notes.pdf', '12'],
-      ['pp. 14–15', 'notes.pdf', '14'],
+      ['notes.pdf, p. 12', 'notes.pdf', '12'],
+      ['notes.pdf, pp. 14–15', 'notes.pdf', '14'],
       // The alias means nothing to the reader, so the link shows the PDF's name.
       ['book.pdf, p. 41', 'book.pdf', '41'],
-      ['book.pdf p. 7', 'book.pdf', '7'],
-      ['book.pdf, page 8', 'book.pdf', '8'],
-      ['notes.pdf, s. 9', 'notes.pdf', '9'],
+      ['book.pdf, p. 7', 'book.pdf', '7'],
+      ['book.pdf, p. 8', 'book.pdf', '8'],
+      ['notes.pdf, p. 9', 'notes.pdf', '9'],
     ])
     // A page outside parentheses, or with no PDF to point at, stays text.
     expect(citations(html('Turn to p. 12.', docs))).toEqual([])
     expect(citations(html('As shown (p. 12).', { names: ['book.pdf', 'notes.pdf'] }))).toEqual([])
+  })
+
+  it('turns citations in parentheses into one book icon after the claim, with every place it cites', () => {
+    const docs = { names: ['a.pdf', 'b.pdf'] }
+    const div = html('It is linear (a.pdf, pp. 3–5; b.pdf, p. 9). See a.pdf, p. 2.', docs)
+    const icons = div.querySelectorAll<HTMLAnchorElement>('a.cite-icon')
+    expect(icons).toHaveLength(1)
+    expect(JSON.parse(icons[0].dataset.cites!)).toEqual([
+      { doc: 'a.pdf', page: 3, end: 5 },
+      { doc: 'b.pdf', page: 9 },
+    ])
+    expect(icons[0].getAttribute('aria-label')).toBe('a.pdf, pp. 3–5; b.pdf, p. 9')
+    // The icon follows the word with no space; the parentheses are gone from view.
+    expect(icons[0].previousSibling?.textContent).toBe('It is linear')
+    expect(icons[0].nextSibling?.textContent).toBe('. See ')
+    // A citation written into the sentence stays a text link.
+    expect(div.querySelectorAll('a.citation:not(.cite-icon)')).toHaveLength(1)
+    // Copying gives back the original text.
+    const range = document.createRange()
+    range.selectNodeContents(div)
+    expect(selectedMarkdown(range).replace(/\u00a0/g, ' ')).toBe('It is linear (a.pdf, pp. 3–5; b.pdf, p. 9). See a.pdf, p. 2.')
   })
 
   it('leaves citations as text when no PDFs are given', () => {
