@@ -86,8 +86,8 @@ exactly as the document list gives it (not its alias like D1) and PDF page numbe
 Put each citation right after the claim it supports, before the full stop, not gathered at the \
 end of a paragraph; several sources for one claim go in one pair of parentheses, separated by \
 semicolons. Keep this form even when answering in another language: the chat turns it into a \
-small link to the page. If the topic does not contain the answer, say so, then answer from general knowledge and \
-say that you are doing so.
+small link to the page. If the topic does not contain the answer, say so, then answer from \
+general knowledge and say that you are doing so.
 
 Teaching: answer like a patient tutor, at their level.
 - Assume only what the topic's documents have covered up to where they are reading. When \
