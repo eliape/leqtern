@@ -258,6 +258,9 @@ class AskRequest(BaseModel):
     model: AnswerModel | None = Field(default=None, description="Defaults to ANSWER_MODEL")
     effort: Effort = Field(default=EFFORT, description="For answers and quizzes only")
     instructions: str = Field(default="", description="The reader's instructions, from Settings")
+    about: str = Field(
+        default="", description="What the reader wrote about themselves, in Settings"
+    )
     scope: str = Field(default="", description="The topic's syllabus or scope, and its purpose")
     conventions: str = Field(default="", description="Conventions answers in the topic follow")
     typed_share: float = Field(
@@ -421,6 +424,7 @@ def system_blocks(
     documents: str = "",
     cache: dict[str, str] = LONG_CACHE,
     typed_share: float = MAX_TYPED_SHARE,
+    about_reader: str = "",
 ) -> list[dict[str, Any]]:
     """
     Fixed instructions, the reader's own (set once in Settings, so they rarely change and
@@ -429,6 +433,7 @@ def system_blocks(
     documents (see `catalogue`), all cached.
     """
     own = instructions.strip()
+    reader = about_reader.strip()
     about = [f'The topic is called "{topic}".']
     if scope.strip():
         about.append(TOPIC_SCOPE.format(scope.strip()))
@@ -440,6 +445,7 @@ def system_blocks(
         about.append(typed_setting(typed_share))
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
+        *([{"type": "text", "text": ABOUT_READER.format(reader)}] if reader else []),
         *([{"type": "text", "text": READER_INSTRUCTIONS.format(own)}] if own else []),
         {"type": "text", "text": "\n\n".join(about), "cache_control": {**cache}},
     ]
@@ -456,6 +462,7 @@ def request_system(
         documents,
         cache,
         request.typed_share,
+        request.about,
     )
 
 
@@ -485,6 +492,13 @@ uses another one:
 <topic_conventions>
 {}
 </topic_conventions>"""
+
+ABOUT_READER = """\
+What they wrote about themselves. Use it to pitch your answers: what you can assume they know, \
+and what to tie new ideas to:
+<about_reader>
+{}
+</about_reader>"""
 
 READER_INSTRUCTIONS = """\
 The reader's own instructions for every answer. Follow them; where they differ from the guidance \
